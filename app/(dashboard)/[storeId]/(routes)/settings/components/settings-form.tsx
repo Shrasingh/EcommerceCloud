@@ -36,6 +36,7 @@ type SettingsFormValues = z.infer<typeof formSchema>;
 export const SettingsForm: React.FC<SettingsFormProps> = ({ initialData }) => {
   const params = useParams();
   const router = useRouter();
+  const origin = useOrigin();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const form = useForm<SettingsFormValues>({
@@ -75,7 +76,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ initialData }) => {
       <AlertModal
         isOpen={open}
         onClose={() => setOpen(false)}
-        onConfirm={() => {}}
+        onConfirm={ondelete}
         loading={loading}
       />
       <div className=" flex items-center justify-between">

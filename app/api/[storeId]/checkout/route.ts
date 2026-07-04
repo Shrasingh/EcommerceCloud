@@ -37,7 +37,7 @@ export async function POST(
       line_items.push({
         quantity: 1,
         price_data: {
-          currency: "INR",
+          currency: "usd",
           product_data: {
             name: product.name,
           },
@@ -69,8 +69,8 @@ export async function POST(
       phone_number_collection: {
         enabled: true,
       },
-      success_url: `${process.env.FRONTEND_STORE_URL}/cart?success=1`,
-      cancel_url: `${process.env.FRONTEND_STORE_URL}/cart?cancelled=1`,
+      success_url: `${process.env.FRONTEND_STORE_URL}/order-success?orderId=${order.id}`,
+      cancel_url: `${process.env.FRONTEND_STORE_URL}/cart?canceled=1`,
       metadata: {
         orderId: order.id,
       },

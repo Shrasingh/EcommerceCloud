@@ -26,7 +26,6 @@ import { useRouter } from "next/navigation";
 import { AlertModal } from "@/components/modals/alert-modal";
 
 import { useOrigin } from "@/hooks/use-origin";
-import ImageUpload from "@/components/ui/Image-upload";
 const formSchema = z.object({
   name: z.string().min(1),
   value: z.string().min(4).regex(/^#/, {

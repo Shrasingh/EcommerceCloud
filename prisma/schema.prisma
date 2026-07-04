@@ -79,11 +79,17 @@ model Color {
 model Product {
   id          String   @id @default(uuid())
   storeId     String
-  store       Store    @relation("StoreToProduct", fields: [storeId], references: [id]) 
+  store       Store    @relation("StoreToProduct", fields: [storeId], references: [id])
   categoryId  String
   category    Category  @relation("CategoryToProduct", fields: [categoryId], references: [id])
   name        String
   price       Decimal
+  // Additive, backward-compatible fields (all optional / defaulted) so existing
+  // create/update flows that omit them keep working unchanged.
+  description   String?  @db.Text
+  brand         String?
+  originalPrice Decimal?
+  isInStock     Boolean  @default(true)
   isFeatured  Boolean   @default(false)
   isArchived  Boolean   @default(false)
   sizeId      String

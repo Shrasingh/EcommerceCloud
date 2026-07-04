@@ -20,7 +20,7 @@ export async function POST(req : Request) {
             process.env.STRIPE_WEBHOOK_SECRET!
         );
     } catch (error : any) {
-        return new NextResponse(`Invalid signature, Webhook Error : ${error.message}, { status: 400 }`);
+        return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 });
     }
 
     const session = event.data.object as Stripe.Checkout.Session;
@@ -36,7 +36,7 @@ export async function POST(req : Request) {
     ];
     
     const addressString = addressComponents.filter((c) => c!== null).join(", ");
-    console.log(event)
+
     if(event.type === "checkout.session.completed") {
         const order = await prismadb.order.update({
             where : {

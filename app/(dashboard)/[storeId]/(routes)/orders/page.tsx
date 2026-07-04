@@ -1,6 +1,6 @@
 import { OrderClient } from "./components/client";
 import prismadb from "@/lib/prismadb";
-import { format, formatDate } from "date-fns";
+import { format } from "date-fns";
 import { OrderColumn } from "./components/columns";
 import { formatter } from "@/lib/utils";
 
@@ -33,7 +33,7 @@ const OrdersPage = async ({ params }: { params: { storeId: string } }) => {
       }, 0)
     ),
     isPaid: order.isPaid,
-    createdAt: format(order.createdAt, "dd, mm, yyyy"),
+    createdAt: format(order.createdAt, "MMMM do, yyyy"),
   }));
 
   return (

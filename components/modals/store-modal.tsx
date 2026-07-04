@@ -34,7 +34,8 @@ export const StoreModal = () => {
     try {
       setloading(true);
       const response = await axios.post("/api/stores", values);
-      window.location.assign('/${response.data.id}'); //is going to complete refresh the page but if use router -user experience is not goot 
+      // Full page reload so the new store's server layout re-runs with fresh auth/store data.
+      window.location.assign(`/${response.data.id}`);
     } catch (error) {
       toast.error("Something went wrong");
     } finally {
@@ -49,7 +50,7 @@ export const StoreModal = () => {
       onClose={storeModal.onClose}
     >
       <div>
-        <div className="spacce-y-4 py-2 pb-4">
+        <div className="space-y-4 py-2 pb-4">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)}>
               <FormField

@@ -26,8 +26,8 @@ const store = await prismadb.store.create({
 });
 return NextResponse.json(store);
     }catch(error){
-        console.log('[STORSES_POST]',error);
-        return new NextResponse("Internal error",{status: 400});
+        console.log('[STORES_POST]',error);
+        return new NextResponse("Internal error",{status: 500});
 
     }
 }

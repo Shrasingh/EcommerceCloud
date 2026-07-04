@@ -8,8 +8,12 @@ import { ThemeProvider } from "@/providers/theme-provider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Admin Dashboard",
-  description: "Admin Dashboard",
+  title: {
+    default: "EcommerceCloud — Admin Dashboard",
+    template: "%s | EcommerceCloud",
+  },
+  description:
+    "EcommerceCloud is a multi-store admin dashboard to manage products, categories, inventory, orders and analytics.",
 };
 
 export default function RootLayout({
@@ -18,11 +22,10 @@ export default function RootLayout({
 
   children: React.ReactNode;
 }) {
-  // const store = prismadb.store.update.delete
   return (
     <ClerkProvider>
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <ToastProvider/>
         <ModalProvider/>

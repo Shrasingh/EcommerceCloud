@@ -79,17 +79,39 @@ export async function GET(
   try {
     
     const { searchParams } =new URL(req.url);
-    
+
     const categoryId = searchParams.get("categoryId") ||  undefined;
     const colorId = searchParams.get("colorId") || undefined;
-    
+
     const sizeId = searchParams.get("sizeId") || undefined;
     const isFeatured = searchParams.get("isFeatured") ;
-    
+    const search = searchParams.get("search")?.trim() || undefined;
+    const minPriceParam = searchParams.get("minPrice");
+    const maxPriceParam = searchParams.get("maxPrice");
+    const minPrice = minPriceParam ? Number(minPriceParam) : undefined;
+    const maxPrice = maxPriceParam ? Number(maxPriceParam) : undefined;
+
     if(!params.storeId){
-       return new NextResponse("Store id is required",{status: 400}); 
+       return new NextResponse("Store id is required",{status: 400});
     }
-    
+
+    // Case-insensitive search across name, brand, description and category name.
+    const searchFilter = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: "insensitive" as const } },
+            { brand: { contains: search, mode: "insensitive" as const } },
+            { description: { contains: search, mode: "insensitive" as const } },
+            { category: { name: { contains: search, mode: "insensitive" as const } } },
+          ],
+        }
+      : {};
+
+    const priceFilter =
+      minPrice !== undefined || maxPrice !== undefined
+        ? { price: { gte: minPrice, lte: maxPrice } }
+        : {};
+
     const products = await prismadb.product.findMany({
       where: {
         storeId: params.storeId,
@@ -97,7 +119,9 @@ export async function GET(
         colorId,
         sizeId,
         isFeatured: isFeatured ? true : undefined,
-        isArchived: false
+        isArchived: false,
+        ...searchFilter,
+        ...priceFilter,
       },
       include: {
         images: true,
@@ -108,7 +132,7 @@ export async function GET(
       orderBy: {
       createdAt: 'desc'
     }
-    
+
   });
 
     return NextResponse.json(products);
