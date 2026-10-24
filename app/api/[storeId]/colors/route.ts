@@ -5,10 +5,11 @@ import prismadb from "@/lib/prismadb";
 
 export async function POST(
   req: Request,
-{ params } :  { params: {storeId: string }}
+props: { params: Promise<{storeId: string }> }
 ) {
+  const params = await props.params;
 try {
-  const { userId } = auth();
+  const { userId } = await auth();
   const body = await req.json();
   const { name,value } = body;
   if (!userId) {
@@ -48,8 +49,9 @@ try {
 
 export async function GET(
     req: Request,
-{ params } :  { params: {storeId: string }}
+props: { params: Promise<{storeId: string }> }
 ) {
+  const params = await props.params;
   try {
     const colors = await prismadb.color.findMany({
       where: {

@@ -1,7 +1,5 @@
 import Stripe from "stripe"
 
-const stripe = new Stripe(process.env.STRIPE_API_KEY!,{
-    apiVersion: "2024-04-10",
-    typescript: true,
-});
+// No apiVersion: use the version pinned by the installed stripe SDK.
+const stripe = new Stripe(process.env.STRIPE_API_KEY!);
 export default stripe;

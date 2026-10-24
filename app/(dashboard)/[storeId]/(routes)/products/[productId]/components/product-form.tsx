@@ -31,7 +31,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 const formSchema = z.object({
   name: z.string().min(1),
   images: z.object({ url: z.string({ message: "Image is required" }) }).array(),
-  price: z.coerce.number(),
+  price: z.coerce.number<number>(),
   categoryId: z.string().min(1),
   colorId: z.string().min(1),
   sizeId: z.string().min(1),
@@ -63,7 +63,8 @@ sizes }) => {
   const description = initialData ? "Edit a product " : "Add a new  a product ";
   const toastMessage = initialData ? "product updated" : " product created";
   const action = initialData ? "Save changes " : "Create ";
-  const form = useForm<ProductFormValues>({
+  // zod 4 forms can differ in input/output types (e.g. defaults), so pass both.
+  const form = useForm<z.input<typeof formSchema>, unknown, ProductFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: initialData
       ? {

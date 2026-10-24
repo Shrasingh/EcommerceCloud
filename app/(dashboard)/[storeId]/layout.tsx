@@ -4,12 +4,13 @@ import { auth } from "@clerk/nextjs/server";
 import Navbar from "@/components/navbar";
 export default async function DashboardLayout({
   children,
-  params
+  params: paramsPromise
 }: {
   children: React.ReactNode;
-  params: { storeId: string }
+  params: Promise<{ storeId: string }>
 }) {
-  const { userId } = auth();
+  const params = await paramsPromise;
+  const { userId } = await auth();
   
   if (!userId) {
     redirect('/sign-in');

@@ -6,13 +6,14 @@ import prismadb from '@/lib/prismadb';
 import { SettingsForm } from './components/settings-form';
 
 interface SettingPageprops {
-    params: {
+    params: Promise<{
         storeId: string;
-    }
+    }>
 }
 
-const SettingPage: React.FC<SettingPageprops> = async ({ params }) => {
-    const { userId } = auth();
+const SettingPage: React.FC<SettingPageprops> = async (props) => {
+    const params = await props.params;
+    const { userId } = await auth();
     if (!userId) {
         redirect('/sign-in');
     }
