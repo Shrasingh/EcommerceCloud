@@ -1,6 +1,6 @@
 # EcommerceCloud — Admin Dashboard
 
-A multi-store ecommerce **admin dashboard** built with Next.js 14 (App Router). Create and manage stores, billboards, categories, sizes, colors and products, view orders, and track revenue/sales analytics. It also exposes a **public REST API** that powers the [QuickCart](../QuickCart) storefront.
+A multi-store ecommerce **admin dashboard** built with Next.js 16 (App Router). Create and manage stores, billboards, categories, sizes, colors and products, view orders, and track revenue/sales analytics. It also exposes a **public REST API** that powers the [QuickCart](../QuickCart) storefront.
 
 > This is the backend/control panel of a two-app system:
 > **EcommerceCloud** (this repo — admin + API) and **QuickCart** (customer storefront that consumes this API).
@@ -22,9 +22,9 @@ A multi-store ecommerce **admin dashboard** built with Next.js 14 (App Router). 
 
 | Layer | Tech |
 |---|---|
-| Framework | Next.js 14 (App Router), React 18, TypeScript |
-| Auth | Clerk (`@clerk/nextjs` v5) |
-| Database | PostgreSQL + Prisma ORM |
+| Framework | Next.js 16 (App Router), React 19, TypeScript |
+| Auth | Clerk (`@clerk/nextjs` v7) |
+| Database | PostgreSQL + Prisma ORM (v6) |
 | UI | Tailwind CSS, shadcn/ui (Radix primitives), lucide-react |
 | Forms | react-hook-form + zod |
 | Data grids | @tanstack/react-table |
