@@ -1,6 +1,19 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaNeon } from "@prisma/adapter-neon";
+import { neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
 
-const prisma = new PrismaClient();
+// SEED_NEON_WS=1 sends queries over Neon's WebSocket driver (port 443) instead
+// of a direct TCP connection on 5432 — useful on networks that drop Postgres
+// connections. The app itself still uses the default Prisma connection.
+const prisma = process.env.SEED_NEON_WS
+  ? (() => {
+      neonConfig.webSocketConstructor = ws;
+      return new PrismaClient({
+        adapter: new PrismaNeon({ connectionString: process.env.DATABASE_URL! }),
+      });
+    })()
+  : new PrismaClient();
 
 // ---------------------------------------------------------------------------
 // Store owner. To manage this seeded store inside the admin dashboard you MUST
