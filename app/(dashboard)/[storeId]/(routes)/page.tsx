@@ -70,7 +70,7 @@ const DashboardPage: React.FC<DashboardPageProps> = async ({
               </div>
             </CardContent> 
           </Card>
-          <Card className="col-span-4">
+          <Card className="col-span-3">
             <CardHeader >
               <CardTitle >
               Overview

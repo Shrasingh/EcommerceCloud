@@ -10,7 +10,11 @@ export const getGraphRevenue = async (storeId : string) => {
     const paidOrders = await prismadb.order.findMany({
         where : {
             storeId,
-            isPaid : true
+            isPaid : true,
+            // Only the current year, otherwise e.g. Jan of two years get summed together.
+            createdAt : {
+                gte : new Date(new Date().getFullYear(), 0, 1)
+            }
         },
         include : {
             orderItems : {

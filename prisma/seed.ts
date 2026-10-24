@@ -530,9 +530,8 @@ async function main() {
   console.log("QuickCart storefront .env — set NEXT_PUBLIC_API_URL to:");
   console.log(`  NEXT_PUBLIC_API_URL=${apiUrl}`);
   console.log("-----------------------------------------------------");
-  console.log("Homepage billboard: QuickCart/app/(routes)/page.tsx currently");
-  console.log("hardcodes a billboard id. Update that id to the hero id above:");
-  console.log(`  ${heroBillboard.id}`);
+  console.log("Homepage billboard (optional) — also add to QuickCart .env:");
+  console.log(`  NEXT_PUBLIC_HOME_BILLBOARD_ID=${heroBillboard.id}`);
   console.log("=====================================================\n");
 }
 

@@ -59,7 +59,7 @@ sizes }) => {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const title = initialData ? "Edit Product" : "Create product'";
+  const title = initialData ? "Edit Product" : "Create product";
   const description = initialData ? "Edit a product " : "Add a new  a product ";
   const toastMessage = initialData ? "product updated" : " product created";
   const action = initialData ? "Save changes " : "Create ";
@@ -75,7 +75,7 @@ sizes }) => {
           images: [],
           price: 0,
           categoryId: "",
-          colorId: " ",
+          colorId: "",
           sizeId: "",
           isFeatured: false,
           isArchived: false,
@@ -93,8 +93,7 @@ sizes }) => {
         await axios.post(`/api/${params.storeId}/products`, data);
       }
       router.refresh();
-      router.push(`/${params.storeId}/products
-      `);
+      router.push(`/${params.storeId}/products`);
       toast.success(toastMessage);
     } catch (error) {
       toast.error("Something went wrong  ");
@@ -110,7 +109,7 @@ sizes }) => {
       );
       router.refresh();
       router.push(`/${params.storeId}/products`);
-      toast.success("Store deleted.");
+      toast.success("Product deleted.");
     } catch (error) {
       toast.error(
         " Something went wrong. Please try again. "

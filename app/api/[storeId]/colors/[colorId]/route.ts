@@ -60,6 +60,7 @@ export async function PATCH(
     const color = await prismadb.color.updateMany({
       where: {
         id: params.colorId,
+        storeId: params.storeId,
       },
       data: {
         name,
@@ -99,6 +100,7 @@ try {
   const color = await prismadb.color.deleteMany({
     where: {
       id : params.colorId,
+        storeId: params.storeId,
     }
   });
   return NextResponse.json(color);

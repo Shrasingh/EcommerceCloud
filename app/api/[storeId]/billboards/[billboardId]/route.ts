@@ -55,6 +55,7 @@ export async function PATCH(
     const billboard = await prismadb.billboard.updateMany({
       where: {
         id: params.billboardId,
+        storeId: params.storeId,
       },
       data: {
         label,
@@ -91,6 +92,7 @@ export async function DELETE(
     const billboard = await prismadb.billboard.deleteMany({
       where: {
         id: params.billboardId,
+        storeId: params.storeId,
       },
     });
     return NextResponse.json(billboard);

@@ -55,6 +55,7 @@ export async function PATCH(
     const size = await prismadb.size.updateMany({
       where: {
         id: params.sizeId,
+        storeId: params.storeId,
       },
       data: {
         name,
@@ -91,6 +92,7 @@ export async function DELETE(
     const size = await prismadb.size.deleteMany({
       where: {
         id: params.sizeId,
+        storeId: params.storeId,
       },
     });
     return NextResponse.json(size);

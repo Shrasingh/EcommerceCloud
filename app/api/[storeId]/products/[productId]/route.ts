@@ -11,9 +11,10 @@ export async function GET(
     if (!params.productId) {
       return new NextResponse("Product id is required", { status: 400 });
     }
-    const product = await prismadb.product.findUnique({
+    const product = await prismadb.product.findFirst({
       where: {
         id: params.productId,
+        storeId: params.storeId,
       },
       include: {
         images: true,
@@ -79,8 +80,19 @@ export async function PATCH(
     if (!storeByUserId) {
       return new NextResponse("Unauthorized", { status: 403 });
     }
-   // const product = 
-    await prismadb.product.update({
+    // Make sure the product belongs to this store before touching it.
+    const existingProduct = await prismadb.product.findFirst({
+      where: {
+        id: params.productId,
+        storeId: params.storeId,
+      },
+    });
+    if (!existingProduct) {
+      return new NextResponse("Product not found", { status: 404 });
+    }
+    // Replace the images in a single update so a failure can't leave the
+    // product without images (nested writes run in one transaction).
+    const product = await prismadb.product.update({
       where: {
         id: params.productId,
       },
@@ -91,29 +103,18 @@ export async function PATCH(
        colorId,
        sizeId,
        images: {
-        deleteMany: {}
+        deleteMany: {},
+        createMany: {
+          data: [
+            ...images.map( (image: { url  : string}) => image),
+          ]
+        }
        },
        isFeatured,
        isArchived
       },
     });
-    const product=await prismadb.product.update({
-      where: {
-        id : params.productId
-    },
-    data: {
-        
-        images: {
-         createMany: {
-          data: [
-            ...images.map( (image: { url  : string}) => image),
-          ]
-         }
-        }
-        
-    }
-    })
-  
+
     return NextResponse.json(product);
   } catch (error) {
     console.log("[PRODUCT_PATCH]", error);
@@ -144,6 +145,7 @@ export async function DELETE(
     const product = await prismadb.product.deleteMany({
       where: {
         id: params.productId,
+        storeId: params.storeId,
       },
     });
     return NextResponse.json(product);
