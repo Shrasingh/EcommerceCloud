@@ -1,13 +1,15 @@
  import { SizesClient } from "./components/client";
 import prismadb from "@/lib/prismadb";
 import { format, formatDate } from "date-fns";
-import { SizeColumn } from "./components/columns" 
+import { SizeColumn } from "./components/columns"
+import { requireStoreAccess } from "@/lib/require-store";
 const SizesPage  = async  ({
   params: paramsPromise
 }: {
   params: Promise<{storeId: string }>
 }) => {
   const params = await paramsPromise;
+  await requireStoreAccess(params.storeId);
 const sizes = await prismadb.size.findMany({
   where: {
     storeId: params.storeId

@@ -1,114 +1,48 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+
 import prismadb from "@/lib/prismadb";
+import { ApiError, assertFound, handleApiError, parseBody, requireStoreOwner } from "@/lib/api";
+import { colorSchema } from "@/lib/validations";
 
+type Params = { params: Promise<{ storeId: string; colorId: string }> };
 
-
-
-
-export async function GET(
-  req: Request,
-  props: { params: Promise<{ colorId: string }> }
-) {
-  const params = await props.params;
+export async function GET(_req: Request, props: Params) {
   try {
-    const { userId } = await auth();
-
-    if (!params.colorId) {
-      return new NextResponse("color id is required", { status: 400 });
-    }
-    const color = await prismadb.color.findUnique({
-      where: {
-        id: params.colorId,
-      },
-    });
+    const { storeId, colorId } = await props.params;
+    const color = await prismadb.color.findFirst({ where: { id: colorId, storeId } });
+    if (!color) throw new ApiError(404, "Color not found");
     return NextResponse.json(color);
   } catch (error) {
-    console.log("[COLOR_GET]", error);
-    return new NextResponse("Internal error", { status: 500 });
+    return handleApiError("COLOR_GET", error);
   }
-};
-
-export async function PATCH(
-  req: Request, // convention to use like this
-  props: { params: Promise<{ storeId: string; colorId: string }> }
-) {
-  const params = await props.params;
-  try {
-    const { userId } = await auth();
-    const body = await req.json();
-    const {name, value } = body;
-    if (!userId) {
-      return new NextResponse("Unauthenticated", { status: 401 });
-    }
-    if (!name) {
-      return new NextResponse("Name is required", { status: 400 });
-    }
-    if (!value) {
-      return new NextResponse("Value is required", { status: 400 });
-    }
-    if (!params.colorId) {
-      return new NextResponse("color id is required", { status: 400 });
-    }
-    const storeByUserId = await prismadb.store.findFirst({
-      where: {
-        id: params.storeId,
-        userId,
-      },
-    });
-    if (!storeByUserId) {
-      return new NextResponse("Unauthorized", { status: 403 });
-    }
-    const color = await prismadb.color.updateMany({
-      where: {
-        id: params.colorId,
-        storeId: params.storeId,
-      },
-      data: {
-        name,
-        value,
-      },
-    });
-    return NextResponse.json(color);
-  } catch (error) {
-    console.log("[color_PATCH]", error);
-    return new NextResponse("Internal error", { status: 500 });
-  }
-};
-export async function DELETE(
-  req: Request,
-props: { params: Promise<{storeId : string , colorId: string }> }
-) {
-  const params = await props.params;
-try {
-  const {userId}= await auth();
-  if(!userId){
-    return new NextResponse("Unauthenticated",{status:401})
-
-  }
-  if(!params.colorId){
-     return new NextResponse("color id is required",{status: 400}); 
-  }
-
-   const storeByUserId = await prismadb.store.findFirst({
-      where: {
-          id: params.storeId,
-          userId
-      }
-  })
-  if(!storeByUserId){
-      return new NextResponse("Unauthorized",{status: 403});
-  }
-
-  const color = await prismadb.color.deleteMany({
-    where: {
-      id : params.colorId,
-        storeId: params.storeId,
-    }
-  });
-  return NextResponse.json(color);
-} catch (error) {
-  console.log('[COLOR_DELETE]', error);
-  return new NextResponse("Internal error", { status: 500 });
 }
+
+export async function PATCH(req: Request, props: Params) {
+  try {
+    const { storeId, colorId } = await props.params;
+    await requireStoreOwner(storeId);
+    const { name, value } = await parseBody(req, colorSchema);
+
+    const result = await prismadb.color.updateMany({
+      where: { id: colorId, storeId },
+      data: { name, value },
+    });
+    return NextResponse.json(assertFound(result, "Color"));
+  } catch (error) {
+    return handleApiError("COLOR_PATCH", error);
+  }
+}
+
+export async function DELETE(_req: Request, props: Params) {
+  try {
+    const { storeId, colorId } = await props.params;
+    await requireStoreOwner(storeId);
+
+    const result = await prismadb.color.deleteMany({ where: { id: colorId, storeId } });
+    return NextResponse.json(assertFound(result, "Color"));
+  } catch (error) {
+    return handleApiError("COLOR_DELETE", error, {
+      conflictMessage: "This color is used by one or more products. Update them first.",
+    });
+  }
 }

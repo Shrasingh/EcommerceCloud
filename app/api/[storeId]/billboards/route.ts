@@ -1,70 +1,35 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 
 import prismadb from "@/lib/prismadb";
-export async function POST(
-    req: Request,
-props: { params: Promise<{storeId: string }> }
-) {
-  const params = await props.params;
+import { handleApiError, parseBody, requireStoreOwner } from "@/lib/api";
+import { billboardSchema } from "@/lib/validations";
+
+type Params = { params: Promise<{ storeId: string }> };
+
+export async function POST(req: Request, props: Params) {
   try {
-    const { userId } = await auth();
-    const body = await req.json();
-    const { label,imageUrl } = body;
-    if (!userId) {
-      return new NextResponse("Unauthenticated", { status: 401 });
-    }
-    if (!label) {
-      return new NextResponse("Label is required", { status: 400 });
-    }
-    if(!imageUrl){
-        return new NextResponse("Image URL is required",{status: 400});
-    }
-    if(!params.storeId){
-       return new NextResponse("Store id is required",{status: 400}); 
-    }
-    const storeByUserId = await prismadb.store.findFirst({
-        where: {
-            id: params.storeId,
-            userId
-        }
-    })
-    if(!storeByUserId){
-        return new NextResponse("Unauthorized",{status: 403});
-    }
+    const { storeId } = await props.params;
+    await requireStoreOwner(storeId);
+    const { label, imageUrl } = await parseBody(req, billboardSchema);
+
     const billboard = await prismadb.billboard.create({
-      data: {
-        label,
-        imageUrl,
-        storeId: params.storeId
-      },
+      data: { label, imageUrl, storeId },
     });
     return NextResponse.json(billboard);
   } catch (error) {
-    console.log('[BILLBOARDS_POST]', error);
-    return new NextResponse("Internal error", { status: 500 });
+    return handleApiError("BILLBOARDS_POST", error);
   }
 }
 
-export async function GET(
-    req: Request,
-props: { params: Promise<{storeId: string }> }
-) {
-  const params = await props.params;
+export async function GET(_req: Request, props: Params) {
   try {
-    
-    if(!params.storeId){
-       return new NextResponse("Store id is required",{status: 400}); 
-    }
-    
-    const billboard = await prismadb.billboard.findMany({
-      where: {
-        storeId: params.storeId,
-      }
+    const { storeId } = await props.params;
+    const billboards = await prismadb.billboard.findMany({
+      where: { storeId },
+      orderBy: { createdAt: "desc" },
     });
-    return NextResponse.json(billboard);
+    return NextResponse.json(billboards);
   } catch (error) {
-    console.log('[BILLBOARDS_GET]', error);
-    return new NextResponse("Internal error", { status: 500 });
+    return handleApiError("BILLBOARDS_GET", error);
   }
 }

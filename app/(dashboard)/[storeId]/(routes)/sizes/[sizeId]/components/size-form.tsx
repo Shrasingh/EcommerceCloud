@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage } from "@/lib/errors";
 import axios from "axios";
 
 import { useParams } from "next/navigation";
@@ -63,11 +64,10 @@ export const SizeForm: React.FC<SizeFormProps> = ({
         await axios.post(`/api/${params.storeId}/sizes`,data);
       }
       router.refresh();
-      router.push(`/${params.storeId}/sizes
-      `)
+      router.push(`/${params.storeId}/sizes`)
       toast.success(toastMessage);
     } catch (error) {
-      toast.error("Something went wrong  ");
+      toast.error(getErrorMessage(error, "Something went wrong"));
     } finally {
       setLoading(false);
     }
@@ -80,9 +80,7 @@ export const SizeForm: React.FC<SizeFormProps> = ({
       router.push("/");
       toast.success("Size deleted.");
     } catch (error) {
-      toast.error(
-        " Make sure you removed all the products using  this size categories first. "
-      );
+      toast.error(getErrorMessage(error, "Could not delete. Please try again."));
     } finally {
       setLoading(false);
       setOpen(false);

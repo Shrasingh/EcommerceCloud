@@ -1,5 +1,6 @@
 "use client"
 
+import { getErrorMessage } from "@/lib/errors";
 import {useForm } from "react-hook-form";
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -77,17 +78,16 @@ export const CategoryForm : React.FC<CategoryFormProps> = ({
             setLoading(true);
             if(initialData) {
                 await axios.patch(`/api/${params.storeId}/categories/${params.categoryId}`, data);
-                console.log("patched", params.catergoryId );
             } else {
                 await axios.post(`/api/${params.storeId}/categories`, data);
             }
 
             router.refresh();
             router.push(`/${params.storeId}/categories`);
-            toast.success("Category updated successfully");
+            toast.success(toastMessage);
             
-        } catch (error: any) {
-            toast.error("Something went wrong.", error.message);
+        } catch (error) {
+            toast.error(getErrorMessage(error, "Something went wrong."));
         } finally {
             setLoading(false);
         }
@@ -102,7 +102,7 @@ export const CategoryForm : React.FC<CategoryFormProps> = ({
             toast.success("Category deleted");
             
         } catch (error) {
-            toast.error("Make sure you removed all products using this category first, then try again.")
+            toast.error(getErrorMessage(error, "Could not delete. Please try again."))
         } finally {
             setLoading(false);
             setOpen(false);

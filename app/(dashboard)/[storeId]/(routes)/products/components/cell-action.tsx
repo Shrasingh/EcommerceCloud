@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage } from "@/lib/errors";
 import { AlertModal } from "@/components/modals/alert-modal";
 import axios from "axios"; // axios is a promise-based HTTP client for JavaScript, used to make asynchronous HTTP requests to REST endpoints and handle responses in web applications.
 import { Button } from "@/components/ui/button";
@@ -34,9 +35,7 @@ export const CellAction: React.FC<CellActionProps> = ({ data }) => {
       router.push(`/${params.storeId}/products`);
       toast.success("Product deleted.");
     } catch (error) {
-      toast.error(
-        "Something went wrong when deleting product. Please try again."
-      );
+      toast.error(getErrorMessage(error, "Could not delete. Please try again."));
     } finally {
       setLoading(false);
       setOpen(false);

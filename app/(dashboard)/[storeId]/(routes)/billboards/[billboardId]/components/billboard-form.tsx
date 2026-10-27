@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage } from "@/lib/errors";
 import axios from "axios";
 
 import { useParams } from "next/navigation";
@@ -64,11 +65,10 @@ export const BillboardForm: React.FC<BillboardFormProps> = ({
         await axios.post(`/api/${params.storeId}/billboards`,data);
       }
       router.refresh();
-      router.push(`/${params.storeId}/billboards
-      `)
+      router.push(`/${params.storeId}/billboards`)
       toast.success(toastMessage);
     } catch (error) {
-      toast.error("Something went wrong  ");
+      toast.error(getErrorMessage(error, "Something went wrong"));
     } finally {
       setLoading(false);
     }
@@ -78,12 +78,10 @@ export const BillboardForm: React.FC<BillboardFormProps> = ({
       setLoading(true);
       await axios.delete(`/api/${params.storeId}/billboards/${params.billboardId}`);
       router.refresh();
-      router.push("/");
-      toast.success("Store deleted.");
+      router.push(`/${params.storeId}/billboards`);
+      toast.success("Billboard deleted.");
     } catch (error) {
-      toast.error(
-        " Make sure you removed all the products and categories first. "
-      );
+      toast.error(getErrorMessage(error, "Could not delete. Please try again."));
     } finally {
       setLoading(false);
       setOpen(false);

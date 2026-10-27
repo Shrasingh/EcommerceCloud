@@ -1,159 +1,77 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+
 import prismadb from "@/lib/prismadb";
-export async function GET(
-  req: Request,
-  props: { params: Promise<{ storeId: string; productId: string }> }
-) {
-  const params = await props.params;
-  try {
-    const { userId } = await auth();
+import {
+  ApiError,
+  assertFound,
+  assertRefsInStore,
+  handleApiError,
+  parseBody,
+  requireStoreOwner,
+} from "@/lib/api";
+import { productSchema } from "@/lib/validations";
 
-    if (!params.productId) {
-      return new NextResponse("Product id is required", { status: 400 });
-    }
+type Params = { params: Promise<{ storeId: string; productId: string }> };
+
+export async function GET(_req: Request, props: Params) {
+  try {
+    const { storeId, productId } = await props.params;
     const product = await prismadb.product.findFirst({
-      where: {
-        id: params.productId,
-        storeId: params.storeId,
-      },
-      include: {
-        images: true,
-        category: true,
-        size: true,
-        color: true
-      }
+      where: { id: productId, storeId },
+      include: { images: true, category: true, size: true, color: true },
     });
+    if (!product) throw new ApiError(404, "Product not found");
     return NextResponse.json(product);
   } catch (error) {
-    console.log("[product_GET]", error);
-    return new NextResponse("Internal error", { status: 500 });
+    return handleApiError("PRODUCT_GET", error);
   }
-};
+}
 
-export async function PATCH(
-  req: Request, // convention to use like this
-  props: { params: Promise<{ storeId: string; productId: string }> }
-) {
-  const params = await props.params;
+export async function PATCH(req: Request, props: Params) {
   try {
-    const { userId } = await auth();
-    const body = await req.json();
+    const { storeId, productId } = await props.params;
+    await requireStoreOwner(storeId);
+    const { images, ...data } = await parseBody(req, productSchema);
+    await assertRefsInStore(storeId, {
+      categoryId: data.categoryId,
+      sizeId: data.sizeId,
+      colorId: data.colorId,
+    });
 
-    const {
-      name ,
-      price,
-      categoryId,
-      colorId,
-      sizeId,
-      images,
-      isFeatured,
-      isArchived } = body;
-    if (!userId) {
-      return new NextResponse("Unauthenticated", { status: 401 });
-    }
-    if (!name) {
-      return new NextResponse("Name is required", { status: 400 });
-    }
-    if(!images || !images.length){
-      return new NextResponse("Images are required",{status: 400}); 
-   }
-    if(!price){
-        return new NextResponse("Price is required",{status: 400});
-    }
-    if(!categoryId){
-       return new NextResponse("Category Id is required",{status: 400}); 
-    }
-    if(!sizeId){
-      return new NextResponse("Size Id is required",{status: 400}); 
-   }
-   if(!colorId){
-    return new NextResponse("Color Id is required",{status: 400}); 
- }
-    if (!params.productId) {
-      return new NextResponse("Product id is required", { status: 400 });
-    }
-    const storeByUserId = await prismadb.store.findFirst({
-      where: {
-        id: params.storeId,
-        userId,
-      },
+    const existing = await prismadb.product.findFirst({
+      where: { id: productId, storeId },
+      select: { id: true },
     });
-    if (!storeByUserId) {
-      return new NextResponse("Unauthorized", { status: 403 });
-    }
-    // Make sure the product belongs to this store before touching it.
-    const existingProduct = await prismadb.product.findFirst({
-      where: {
-        id: params.productId,
-        storeId: params.storeId,
-      },
-    });
-    if (!existingProduct) {
-      return new NextResponse("Product not found", { status: 404 });
-    }
-    // Replace the images in a single update so a failure can't leave the
-    // product without images (nested writes run in one transaction).
+    if (!existing) throw new ApiError(404, "Product not found");
+
+    // Nested writes run in one transaction, so a failure can't leave the
+    // product without images.
     const product = await prismadb.product.update({
-      where: {
-        id: params.productId,
-      },
+      where: { id: productId },
       data: {
-       name,
-       price,
-       categoryId,
-       colorId,
-       sizeId,
-       images: {
-        deleteMany: {},
-        createMany: {
-          data: [
-            ...images.map( (image: { url  : string}) => image),
-          ]
-        }
-       },
-       isFeatured,
-       isArchived
+        ...data,
+        images: { deleteMany: {}, createMany: { data: images } },
       },
     });
+    return NextResponse.json(product);
+  } catch (error) {
+    return handleApiError("PRODUCT_PATCH", error);
+  }
+}
 
-    return NextResponse.json(product);
-  } catch (error) {
-    console.log("[PRODUCT_PATCH]", error);
-    return new NextResponse("Internal error", { status: 500 });
-  }
-};
-export async function DELETE(
-  req: Request,
-  props: { params: Promise<{ storeId: string; productId: string }> }
-) {
-  const params = await props.params;
+export async function DELETE(_req: Request, props: Params) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return new NextResponse("Unauthenticated", { status: 401 });
-    }
-    if (!params.productId) {
-      return new NextResponse("Product id is required", { status: 400 });
-    }
-    const storeByUserId = await prismadb.store.findFirst({
-      where: {
-        id: params.storeId,
-        userId,
-      },
+    const { storeId, productId } = await props.params;
+    await requireStoreOwner(storeId);
+
+    const result = await prismadb.product.deleteMany({
+      where: { id: productId, storeId },
     });
-    if (!storeByUserId) {
-      return new NextResponse("Unauthorized", { status: 403 });
-    }
-    const product = await prismadb.product.deleteMany({
-      where: {
-        id: params.productId,
-        storeId: params.storeId,
-      },
-    });
-    return NextResponse.json(product);
+    return NextResponse.json(assertFound(result, "Product"));
   } catch (error) {
-    console.log("[PRODUCT_DELETE]", error);
-    return new NextResponse("Internal error", { status: 500 });
+    return handleApiError("PRODUCT_DELETE", error, {
+      conflictMessage:
+        "This product appears in existing orders and cannot be deleted. Mark it as Archived instead to hide it from the store.",
+    });
   }
-};
+}

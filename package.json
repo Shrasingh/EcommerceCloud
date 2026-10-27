@@ -8,7 +8,12 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint .",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "backfill:prices": "tsx prisma/backfill-order-prices.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -47,6 +52,7 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
     "@neondatabase/serverless": "^1.2.0",
     "@prisma/adapter-neon": "^6.19.3",
     "@types/node": "^22.20.5",
@@ -60,6 +66,7 @@
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.15",
     "typescript": "^5",
+    "vitest": "^3.2.7",
     "ws": "^8.22.0"
   }
 }

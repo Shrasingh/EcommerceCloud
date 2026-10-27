@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage } from "@/lib/errors";
 import { Modal } from "@/components/ui/modal";
 import { useStoreModal } from "@/hooks/use-store-modal";
 import { z } from "zod";
@@ -37,7 +38,7 @@ export const StoreModal = () => {
       // Full page reload so the new store's server layout re-runs with fresh auth/store data.
       window.location.assign(`/${response.data.id}`);
     } catch (error) {
-      toast.error("Something went wrong");
+      toast.error(getErrorMessage(error, "Something went wrong"));
     } finally {
       setloading(false);
     }

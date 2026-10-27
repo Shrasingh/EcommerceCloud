@@ -1,7 +1,6 @@
-import prismadb from "@/lib/prismadb";
-import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
 import Navbar from "@/components/navbar";
+import { requireStoreAccess } from "@/lib/require-store";
+
 export default async function DashboardLayout({
   children,
   params: paramsPromise
@@ -10,29 +9,9 @@ export default async function DashboardLayout({
   params: Promise<{ storeId: string }>
 }) {
   const params = await paramsPromise;
-  const { userId } = await auth();
-  
-  if (!userId) {
-    redirect('/sign-in');
-   // return; // ensure function exits after redirect
-  }
-
-  const store = await prismadb.store.findFirst({
-    where: {
-      id: params.storeId, // corrected to match the params key
-      userId // corrected to match the authenticated user
-    }
-  });
-
-  if (!store) {
-    redirect('/');
-  return; // ensure function exits after redirect
-  }
-
-  // if (store) {
-  //   redirect(`/${store.id}`);
-  //    //ensure function exits after redirect
-  // }
+  // Authorization lives in the guard (shared with each page via React cache),
+  // not only here: a layout is not a reliable security boundary on its own.
+  await requireStoreAccess(params.storeId);
 
   return (
     <>

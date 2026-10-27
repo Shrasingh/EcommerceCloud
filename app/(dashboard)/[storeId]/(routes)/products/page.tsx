@@ -3,6 +3,7 @@ import prismadb from "@/lib/prismadb";
 import { format, formatDate } from "date-fns";
 import { ProductColumn } from "./components/columns" 
 import { formatter } from "@/lib/utils";
+import { requireStoreAccess } from "@/lib/require-store";
 
 const ProductsPage  = async  ({
   params: paramsPromise
@@ -10,6 +11,7 @@ const ProductsPage  = async  ({
   params: Promise<{storeId: string }>
 }) => {
   const params = await paramsPromise;
+  await requireStoreAccess(params.storeId);
 const products = await prismadb.product.findMany({
   where: {
     storeId: params.storeId

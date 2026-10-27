@@ -5,6 +5,11 @@ import Image from "next/image";
 import { CldUploadWidget } from "next-cloudinary";
 import { Button } from "@/components/ui/button";
 import { ImagePlus, Trash } from "lucide-react";
+// Must be an *unsigned* upload preset in your own Cloudinary account. There is
+// no default: without this set, uploads are disabled rather than falling back
+// to someone else's preset.
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
 interface ImageUploadProps {
   disabled?: boolean;
   onChange: (value: string) => void;
@@ -51,24 +56,37 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
           </div>
         ))}
       </div>
-      <CldUploadWidget onSuccess={onUpload} uploadPreset="qqvrc6l5">
-        {({ open }) => {
-          const onClick = () => {
-            open();
-          };
-          return (
-            <Button
-              type="button"
-              disabled={disabled}
-              variant="secondary"
-              onClick={onClick}
-            >
-              <ImagePlus className="h-4 w-4 mr-2" />
-              Upload an Image 
-            </Button>
-          );
-        }}
-      </CldUploadWidget>
+      {!UPLOAD_PRESET ? (
+        <div>
+          <Button type="button" disabled variant="secondary">
+            <ImagePlus className="h-4 w-4 mr-2" />
+            Upload an Image
+          </Button>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Image uploads are disabled: set <code>NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET</code> to an
+            unsigned upload preset in your own Cloudinary account.
+          </p>
+        </div>
+      ) : (
+        <CldUploadWidget onSuccess={onUpload} uploadPreset={UPLOAD_PRESET}>
+          {({ open }) => {
+            const onClick = () => {
+              open();
+            };
+            return (
+              <Button
+                type="button"
+                disabled={disabled}
+                variant="secondary"
+                onClick={onClick}
+              >
+                <ImagePlus className="h-4 w-4 mr-2" />
+                Upload an Image
+              </Button>
+            );
+          }}
+        </CldUploadWidget>
+      )}
     </div>
   );
 };

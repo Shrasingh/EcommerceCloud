@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage } from "@/lib/errors";
 import axios from "axios";
 
 import { useParams } from "next/navigation";
@@ -26,11 +27,10 @@ import { useRouter } from "next/navigation";
 import { AlertModal } from "@/components/modals/alert-modal";
 
 import { useOrigin } from "@/hooks/use-origin";
+import { HEX_COLOR } from "@/lib/validations";
 const formSchema = z.object({
   name: z.string().min(1),
-  value: z.string().min(4).regex(/^#/, {
-    message: 'String must be a valid hex code ',
-  }),
+  value: z.string().regex(HEX_COLOR, "Must be a hex color code, e.g. #ff0000"),
 });
 
 type ColorFormValues = z.infer<typeof formSchema>;
@@ -65,11 +65,10 @@ export const ColorForm: React.FC<ColorFormProps> = ({
         await axios.post(`/api/${params.storeId}/colors`,data);
       }
       router.refresh();
-      router.push(`/${params.storeId}/colors
-      `)
+      router.push(`/${params.storeId}/colors`)
       toast.success(toastMessage);
     } catch (error) {
-      toast.error("Something went wrong  ");
+      toast.error(getErrorMessage(error, "Something went wrong"));
     } finally {
       setLoading(false);
     }
@@ -82,9 +81,7 @@ export const ColorForm: React.FC<ColorFormProps> = ({
       router.push("/");
       toast.success("Color deleted.");
     } catch (error) {
-      toast.error(
-        " Make sure you removed all the products using  this size color first. "
-      );
+      toast.error(getErrorMessage(error, "Could not delete. Please try again."));
     } finally {
       setLoading(false);
       setOpen(false);

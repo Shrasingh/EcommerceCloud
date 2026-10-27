@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage } from "@/lib/errors";
 import axios from "axios";
 
 import { useParams } from "next/navigation";
@@ -50,7 +51,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ initialData }) => {
       router.refresh();
       toast.success("Store updated");
     } catch (error) {
-      toast.error("Something went wrong  ");
+      toast.error(getErrorMessage(error, "Something went wrong"));
     } finally {
       setLoading(false);
     }
@@ -63,9 +64,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ initialData }) => {
       router.push("/");
       toast.success("Store deleted.");
     } catch (error) {
-      toast.error(
-        " Make sure you removed all the products and categories first. "
-      );
+      toast.error(getErrorMessage(error, "Could not delete. Please try again."));
     } finally {
       setLoading(false);
       setOpen(false);
@@ -80,7 +79,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ initialData }) => {
         loading={loading}
       />
       <div className=" flex items-center justify-between">
-        <Heading title="Settings" description="Manage store prefernces" />
+        <Heading title="Settings" description="Manage store preferences" />
 
         <Button
           disabled={loading}

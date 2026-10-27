@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaNeon } from "@prisma/adapter-neon";
 import { neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
+import { checkSeedAllowed, databaseHostFrom } from "./seed-guard";
 
 // SEED_NEON_WS=1 sends queries over Neon's WebSocket driver (port 443) instead
 // of a direct TCP connection on 5432 — useful on networks that drop Postgres
@@ -416,6 +417,17 @@ async function main() {
     );
   } else {
     console.log(`Using store owner id: ${OWNER_ID}\n`);
+  }
+
+  const guard = checkSeedAllowed({
+    existingStores: await prisma.store.count(),
+    databaseHost: databaseHostFrom(process.env.DATABASE_URL),
+    env: process.env,
+  });
+  if (!guard.allowed) {
+    console.error(`\nSEED ABORTED — nothing was deleted.\n${guard.reason}\n`);
+    process.exitCode = 1;
+    return;
   }
 
   console.log("Clearing existing data...");
