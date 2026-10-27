@@ -7,9 +7,20 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # The Prisma CLI, client and adapter must stay on the same version, so they
+    # are bumped together. Groups are matched in order: keep `prisma` first.
     groups:
+      prisma:
+        patterns: ["prisma", "@prisma/*"]
       minor-and-patch:
         update-types: [minor, patch]
+    # A Prisma major (e.g. 6 -> 7) needs schema, prisma.config.ts and client
+    # adapter changes that Dependabot cannot make; do it as a deliberate PR.
+    ignore:
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
