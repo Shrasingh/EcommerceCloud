@@ -2,13 +2,15 @@ import { CategoryClient } from "./components/client";
 import prismadb from "@/lib/prismadb";
 
 import { format, formatDate } from "date-fns";
-import { CategoryColumn  } from "./components/columns" 
+import { CategoryColumn  } from "./components/columns"
+import { requireStoreAccess } from "@/lib/require-store";
 const CategoriesPage  = async  ({
   params: paramsPromise
 }: {
   params: Promise<{storeId: string }>
 }) => {
   const params = await paramsPromise;
+  await requireStoreAccess(params.storeId);
 const categories = await prismadb.category.findMany({
   where: {
     storeId: params.storeId

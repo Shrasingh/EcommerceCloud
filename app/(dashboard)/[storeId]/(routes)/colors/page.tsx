@@ -1,13 +1,15 @@
  import { ColorsClient } from "./components/client";
 import prismadb from "@/lib/prismadb";
 import { format, formatDate } from "date-fns";
-import { ColorColumn } from "./components/columns" 
+import { ColorColumn } from "./components/columns"
+import { requireStoreAccess } from "@/lib/require-store";
 const ColorsPage  = async  ({
   params: paramsPromise
 }: {
   params: Promise<{storeId: string }>
 }) => {
   const params = await paramsPromise;
+  await requireStoreAccess(params.storeId);
 const colors = await prismadb.color.findMany({
   where: {
     storeId: params.storeId

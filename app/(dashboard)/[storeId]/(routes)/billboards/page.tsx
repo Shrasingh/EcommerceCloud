@@ -1,13 +1,15 @@
 import { BillboardClient } from "./components/client";
 import prismadb from "@/lib/prismadb";
 import { format, formatDate } from "date-fns";
-import { BillboardColumn } from "./components/columns" 
+import { BillboardColumn } from "./components/columns"
+import { requireStoreAccess } from "@/lib/require-store";
 const BillboardsPage  = async  ({
   params: paramsPromise
 }: {
   params: Promise<{storeId: string }>
 }) => {
   const params = await paramsPromise;
+  await requireStoreAccess(params.storeId);
 const billboards = await prismadb.billboard.findMany({
   where: {
     storeId: params.storeId

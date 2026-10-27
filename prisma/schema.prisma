@@ -123,6 +123,9 @@ model Order {
   isPaid Boolean @default(false)
   phone String @default("")
   address String @default("")
+  /// Stripe Checkout Session created for this order. NULL for orders created
+  /// before sessions were recorded.
+  stripeSessionId String? @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([storeId])
@@ -133,6 +136,33 @@ model OrderItem {
   order Order @relation( fields: [orderId], references: [id])
 productId String
 product Product @relation( fields: [productId], references: [id])
+  /// Unit price charged at checkout in major units (e.g. dollars), derived from
+  /// the exact integer amount sent to Stripe. NULL = not recorded (orders created
+  /// before price tracking). Never backfilled from the current catalog price.
+  unitPrice Decimal? @db.Decimal(12, 2)
+  /// ISO 4217 code in lower case, as Stripe uses it (e.g. "usd"). NULL exactly
+  /// when unitPrice is NULL; enforced by a CHECK constraint in the migration.
+  currency  String?  @db.VarChar(3)
 @@index([orderId])
 @@index([productId])
+}
+
+/// A paid Stripe session that could not be reconciled with its order (amount,
+/// currency or session/order mismatch). Durable, reviewable record written by
+/// the webhook instead of only logging. Holds no customer PII or card data:
+/// just ids, the reason, and resolution status. `orderId` is intentionally not
+/// a foreign key so exceptions for unknown/removed orders can still be stored.
+model PaymentException {
+  id         String    @id @default(uuid())
+  orderId    String
+  sessionId  String
+  reason     String
+  /// Stripe event id. Unique, so a redelivered event records the mismatch once.
+  eventId    String    @unique
+  resolved   Boolean   @default(false)
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([orderId])
+  @@index([resolved])
 }

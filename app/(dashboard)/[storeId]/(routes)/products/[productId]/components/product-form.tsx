@@ -1,4 +1,5 @@
 "use client";
+import { getErrorMessage } from "@/lib/errors";
 import axios from "axios";
 import { Select ,SelectContent,SelectValue,SelectItem,SelectTrigger } from "@/components/ui/select"
 import { useParams } from "next/navigation";
@@ -97,7 +98,7 @@ sizes }) => {
       router.push(`/${params.storeId}/products`);
       toast.success(toastMessage);
     } catch (error) {
-      toast.error("Something went wrong  ");
+      toast.error(getErrorMessage(error, "Something went wrong"));
     } finally {
       setLoading(false);
     }
@@ -112,9 +113,7 @@ sizes }) => {
       router.push(`/${params.storeId}/products`);
       toast.success("Product deleted.");
     } catch (error) {
-      toast.error(
-        " Something went wrong. Please try again. "
-      );
+      toast.error(getErrorMessage(error, "Something went wrong. Please try again."));
     } finally {
       setLoading(false);
       setOpen(false);

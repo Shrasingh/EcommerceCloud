@@ -1,7 +1,6 @@
 import prismadb from "@/lib/prismadb";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation"; // Correct import for redirect
-import { Chilanka } from "next/font/google";
 
 export default async function SetupLayout({
   children
@@ -12,7 +11,6 @@ export default async function SetupLayout({
  
   if (!userId) {
     redirect('/sign-in');
-    return; // Ensure function exits after redirect
   }
 
   
@@ -25,7 +23,6 @@ export default async function SetupLayout({
 
   if (store) {
     redirect(`/${store.id}`);
-    return; // Ensure function exits after redirect
   }
 
   return (

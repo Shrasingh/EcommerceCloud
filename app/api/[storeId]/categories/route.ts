@@ -1,73 +1,37 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 
 import prismadb from "@/lib/prismadb";
-export async function POST(
-    req: Request,
-props: { params: Promise<{storeId: string }> }
-) {
-  const params = await props.params;
-  try {
-    const { userId } = await auth();
-    const body = await req.json();
-    const { name, billboardId } = body;
-    if (!userId) {
-      return new NextResponse("Unauthenticated", { status: 401 });
-    }
-    if (!name) {
-      return new NextResponse("Name is required", { status: 400 });
-    }
-    if(!billboardId){
-        return new NextResponse("Billboard id  is required",{status: 400});
-    }
-    if(!params.storeId){
-       return new NextResponse("Store id is required",{status: 400}); 
-    }
-    const storeByUserId = await prismadb.store.findFirst({
-        where: {
-            id: params.storeId,
-            userId
-        }
-    })
-    if(!storeByUserId){
-        return new NextResponse("Unauthorized",{status: 403});
-    }
-    const category  = await prismadb.category.create({
-      data: {
-        name,
-        billboardId,
-        storeId: params.storeId
-      },
-    });
-    return NextResponse.json(category);
-  } catch (error) {
-    console.log('[CATEGORIES__POST]', error);
-    return new NextResponse("Internal error", { status: 500 });
-  }
-};
+import { assertRefsInStore, handleApiError, parseBody, requireStoreOwner } from "@/lib/api";
+import { categorySchema } from "@/lib/validations";
 
-export async function GET(
-    req: Request,
-props: { params: Promise<{storeId: string }> }
-) {
-  const params = await props.params;
+type Params = { params: Promise<{ storeId: string }> };
+
+export async function POST(req: Request, props: Params) {
   try {
-    
-    if(!params.storeId){
-       return new NextResponse("Category  id is required",{status: 400}); 
-    }
-    
-    const category = await prismadb.category.findMany({
-      where: {
-        storeId: params.storeId,
-      },
-      include : {
-      billboard: true 
-      }
+    const { storeId } = await props.params;
+    await requireStoreOwner(storeId);
+    const { name, billboardId } = await parseBody(req, categorySchema);
+    await assertRefsInStore(storeId, { billboardId });
+
+    const category = await prismadb.category.create({
+      data: { name, billboardId, storeId },
     });
     return NextResponse.json(category);
   } catch (error) {
-    console.log('[CATEGORIES_POST]', error);
-    return new NextResponse("Internal error", { status: 500 });
+    return handleApiError("CATEGORIES_POST", error);
+  }
+}
+
+export async function GET(_req: Request, props: Params) {
+  try {
+    const { storeId } = await props.params;
+    const categories = await prismadb.category.findMany({
+      where: { storeId },
+      include: { billboard: true },
+      orderBy: { createdAt: "asc" },
+    });
+    return NextResponse.json(categories);
+  } catch (error) {
+    return handleApiError("CATEGORIES_GET", error);
   }
 }
