@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
-import { prismaMock, resetPrismaMock, transactionMock } from "../helpers/prisma-mock";
+import { prismaMock, queryRawMock, resetPrismaMock, transactionMock } from "../helpers/prisma-mock";
+import { CHECKOUT_RATE_LIMIT } from "@/lib/rate-limit";
 import { ctx, jsonRequest } from "../helpers/http";
 
 const stripeMock = vi.hoisted(() => ({
@@ -29,10 +30,40 @@ beforeEach(() => {
 });
 
 describe("POST /api/[storeId]/checkout", () => {
-  it("returns 400 (with CORS headers) for an empty cart", async () => {
-    const res = await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: [] }), ctx({ storeId: "s1" }));
+  it("returns 400 (with CORS headers for the storefront origin) for an empty cart", async () => {
+    const res = await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: [] }, { Origin: "https://store.example" }),
+      ctx({ storeId: "s1" })
+    );
     expect(res.status).toBe(400);
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://store.example");
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("sets a short session expiry (Unix seconds) to shrink the double-sell window", async () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: "p1", name: "Lamp", price: decimal(5) }]);
+    prismaMock.order.create.mockResolvedValue({ id: "o1" });
+    stripeMock.checkout.sessions.create.mockResolvedValue({ id: "cs_1", url: "https://checkout.stripe.com/x" });
+
+    const before = Math.floor(Date.now() / 1000);
+    await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    const after = Math.floor(Date.now() / 1000);
+    const { expires_at } = stripeMock.checkout.sessions.create.mock.calls[0][0];
+
+    expect(Number.isInteger(expires_at)).toBe(true);
+    // Lifetime as seen from this process: 60 minutes, give or take the test's own run time.
+    expect(expires_at - before).toBeGreaterThanOrEqual(checkout.SESSION_EXPIRY_SECONDS);
+    expect(expires_at - after).toBeLessThanOrEqual(checkout.SESSION_EXPIRY_SECONDS);
+    expect(expires_at - before).toBeLessThan(checkout.SESSION_EXPIRY_SECONDS + 60);
+  });
+
+  it("keeps a safety margin over Stripe's 30-minute minimum for clock skew and latency", () => {
+    expect(checkout.STRIPE_MIN_SESSION_LIFETIME_SECONDS).toBe(30 * 60);
+    expect(checkout.SESSION_EXPIRY_MARGIN_SECONDS).toBeGreaterThanOrEqual(60);
+    expect(checkout.SESSION_EXPIRY_SECONDS).toBe(60 * 60);
+    expect(checkout.SESSION_EXPIRY_SECONDS - checkout.STRIPE_MIN_SESSION_LIFETIME_SECONDS).toBe(checkout.SESSION_EXPIRY_MARGIN_SECONDS);
+    // Still well inside Stripe's 24-hour maximum.
+    expect(checkout.SESSION_EXPIRY_SECONDS).toBeLessThan(24 * 60 * 60);
   });
 
   it("only considers this store's unarchived, in-stock products", async () => {
@@ -182,7 +213,7 @@ describe("POST /api/[storeId]/checkout", () => {
     const body = await res.text();
     expect(body).toBe("Checkout is temporarily unavailable due to a server configuration error.");
     expect(body).not.toContain("secret");
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
     expect(prismaMock.product.findMany).not.toHaveBeenCalled();
     expect(prismaMock.order.create).not.toHaveBeenCalled();
     expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
@@ -216,6 +247,124 @@ describe("POST /api/[storeId]/checkout", () => {
     expect(transactionMock).toHaveBeenCalledTimes(1);
     expect(prismaMock.orderItem.deleteMany).toHaveBeenCalledWith({ where: { orderId: "o1" } });
     expect(prismaMock.order.delete).toHaveBeenCalledWith({ where: { id: "o1" } });
+  });
+});
+
+describe("POST /api/[storeId]/checkout: storefront origin isolation", () => {
+  const available = () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: "p1", name: "Lamp", price: decimal(5) }]);
+    prismaMock.order.create.mockResolvedValue({ id: "o1" });
+    stripeMock.checkout.sessions.create.mockResolvedValue({ id: "cs_1", url: "https://checkout.stripe.com/x" });
+  };
+
+  it("refuses a browser origin that is not on the allow list before touching the database", async () => {
+    available();
+    const res = await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://quick-cart-git-feature-x.vercel.app" }),
+      ctx({ storeId: "s1" })
+    );
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe("This storefront is not allowed to start a checkout.");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(prismaMock.product.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.order.create).not.toHaveBeenCalled();
+    expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("never redirects a Preview origin to production: an allow-listed origin gets its own success/cancel URLs", async () => {
+    process.env.ALLOWED_STOREFRONT_ORIGINS = "https://quick-cart-staging.vercel.app";
+    available();
+    try {
+      const res = await checkout.POST(
+        jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://quick-cart-staging.vercel.app" }),
+        ctx({ storeId: "s1" })
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://quick-cart-staging.vercel.app");
+      const session = stripeMock.checkout.sessions.create.mock.calls[0][0];
+      expect(session.success_url).toBe("https://quick-cart-staging.vercel.app/order-success?orderId=o1");
+      expect(session.cancel_url).toBe("https://quick-cart-staging.vercel.app/cart?canceled=1");
+    } finally {
+      delete process.env.ALLOWED_STOREFRONT_ORIGINS;
+    }
+  });
+
+  it("uses FRONTEND_STORE_URL for the production storefront's own origin and for non-browser callers", async () => {
+    available();
+    await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://store.example" }),
+      ctx({ storeId: "s1" })
+    );
+    expect(stripeMock.checkout.sessions.create.mock.calls[0][0].success_url).toBe("https://store.example/order-success?orderId=o1");
+
+    stripeMock.checkout.sessions.create.mockClear();
+    available();
+    await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    expect(stripeMock.checkout.sessions.create.mock.calls[0][0].success_url).toBe("https://store.example/order-success?orderId=o1");
+  });
+
+  it("answers the CORS preflight only for allow-listed origins", async () => {
+    const allowed = await checkout.OPTIONS(
+      new Request("http://localhost/api/s1/checkout", { method: "OPTIONS", headers: { Origin: "https://store.example" } })
+    );
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("https://store.example");
+    expect(allowed.headers.get("Access-Control-Allow-Methods")).toContain("POST");
+
+    const refused = await checkout.OPTIONS(
+      new Request("http://localhost/api/s1/checkout", { method: "OPTIONS", headers: { Origin: "https://evil.example" } })
+    );
+    expect(refused.status).toBe(204);
+    expect(refused.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
+
+describe("POST /api/[storeId]/checkout: rate limiting", () => {
+  const withProduct = () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: "p1", name: "Lamp", price: decimal(5) }]);
+    prismaMock.order.create.mockResolvedValue({ id: "o1" });
+    stripeMock.checkout.sessions.create.mockResolvedValue({ id: "cs_1", url: "https://checkout.stripe.com/x" });
+  };
+
+  it("keys the shared counter by store and client address", async () => {
+    withProduct();
+    await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" }),
+      ctx({ storeId: "s1" })
+    );
+    const [, ...values] = queryRawMock.mock.calls[0];
+    expect(values).toContain("checkout:s1:203.0.113.9");
+  });
+
+  it("returns 429 with Retry-After and creates nothing once the limit is exceeded", async () => {
+    withProduct();
+    queryRawMock.mockResolvedValue([{ count: CHECKOUT_RATE_LIMIT.limit + 1 }]);
+    const res = await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://store.example" }),
+      ctx({ storeId: "s1" })
+    );
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://store.example");
+    expect(await res.text()).toMatch(/Too many checkout attempts/);
+    expect(prismaMock.product.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.order.create).not.toHaveBeenCalled();
+    expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("allows exactly the limit-th request", async () => {
+    withProduct();
+    queryRawMock.mockResolvedValue([{ count: CHECKOUT_RATE_LIMIT.limit }]);
+    const res = await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    expect(res.status).toBe(200);
+  });
+
+  it("fails open (and logs) when the counter store is unavailable", async () => {
+    withProduct();
+    queryRawMock.mockRejectedValue(new Error("connection reset"));
+    const res = await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    expect(res.status).toBe(200);
+    expect(console.error).toHaveBeenCalledWith("[CHECKOUT_RATE_LIMIT]", expect.any(Error));
   });
 });
 

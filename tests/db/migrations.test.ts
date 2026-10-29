@@ -10,6 +10,7 @@ const MIGRATIONS = path.resolve(__dirname, "../../prisma/migrations");
 const migration = (name: string) => readFileSync(path.join(MIGRATIONS, name, "migration.sql"), "utf8");
 const PRICE_MIGRATION = "20261024120000_order_price_snapshot";
 const PAYMENT_EXCEPTION_MIGRATION = "20261026120000_payment_exception";
+const RATE_LIMIT_MIGRATION = "20261029120000_rate_limit";
 
 let db: PGlite;
 
@@ -40,6 +41,7 @@ beforeAll(async () => {
   await seedLegacyData();
   await db.exec(migration(PRICE_MIGRATION));
   await db.exec(migration(PAYMENT_EXCEPTION_MIGRATION));
+  await db.exec(migration(RATE_LIMIT_MIGRATION));
 }, 60_000);
 afterAll(async () => db?.close());
 beforeEach(async () => db.exec("BEGIN"));
@@ -51,7 +53,7 @@ describe("migrations", () => {
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
     expect(folders).toEqual([...folders].sort());
-    expect(folders).toEqual(["0_init", PRICE_MIGRATION, PAYMENT_EXCEPTION_MIGRATION]);
+    expect(folders).toEqual(["0_init", PRICE_MIGRATION, PAYMENT_EXCEPTION_MIGRATION, RATE_LIMIT_MIGRATION]);
   });
 
   it("contain no destructive statements", () => {
@@ -149,5 +151,53 @@ describe(`${PAYMENT_EXCEPTION_MIGRATION} (payment mismatch log)`, () => {
     );
     const row = await db.query(`SELECT "orderId" FROM "PaymentException" WHERE id = 'pe3'`);
     expect(row.rows[0]).toEqual({ orderId: "ghost-order" });
+  });
+});
+
+describe(`${RATE_LIMIT_MIGRATION} (shared checkout rate-limit counters)`, () => {
+  it("is additive: no destructive statements", () => {
+    const sql = migration(RATE_LIMIT_MIGRATION);
+    expect(sql).not.toMatch(/\b(DROP|TRUNCATE|DELETE|RENAME|ALTER\s+COLUMN|SET\s+NOT\s+NULL)\b/i);
+  });
+
+  it("every migration applies in order to an empty database", async () => {
+    const fresh = new PGlite();
+    try {
+      for (const name of ["0_init", PRICE_MIGRATION, PAYMENT_EXCEPTION_MIGRATION, RATE_LIMIT_MIGRATION]) {
+        await fresh.exec(migration(name));
+      }
+      const tables = await fresh.query<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
+      );
+      expect(tables.rows.map((r) => r.table_name)).toEqual([
+        "Billboard", "Category", "Color", "Image", "Order", "OrderItem", "PaymentException", "Product", "RateLimit", "Size", "Store",
+      ]);
+    } finally {
+      await fresh.close();
+    }
+  }, 60_000);
+
+  // The exact statement lib/rate-limit.ts issues, run against real Postgres semantics.
+  const upsert = (key: string, windowStart: string) =>
+    db.query<{ count: number }>(
+      `INSERT INTO "RateLimit" ("key", "windowStart", "count") VALUES ($1, $2, 1)
+       ON CONFLICT ("key") DO UPDATE SET
+         "count" = CASE WHEN "RateLimit"."windowStart" = EXCLUDED."windowStart" THEN "RateLimit"."count" + 1 ELSE 1 END,
+         "windowStart" = EXCLUDED."windowStart"
+       RETURNING "count"`,
+      [key, windowStart]
+    );
+
+  it("increments within the same window and resets when a new window starts", async () => {
+    const w1 = "2026-10-29T10:00:00.000Z";
+    const w2 = "2026-10-29T10:10:00.000Z";
+    expect((await upsert("checkout:s1:1.2.3.4", w1)).rows[0].count).toBe(1);
+    expect((await upsert("checkout:s1:1.2.3.4", w1)).rows[0].count).toBe(2);
+    expect((await upsert("checkout:s1:1.2.3.4", w1)).rows[0].count).toBe(3);
+    // Another client has its own counter.
+    expect((await upsert("checkout:s1:9.9.9.9", w1)).rows[0].count).toBe(1);
+    // A later window starts over for the first client.
+    expect((await upsert("checkout:s1:1.2.3.4", w2)).rows[0].count).toBe(1);
+    expect(await count("RateLimit")).toBe(2);
   });
 });
