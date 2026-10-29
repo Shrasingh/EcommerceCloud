@@ -2,7 +2,12 @@
 
 All notable changes to the admin and commerce API. Dates are merge dates on `main`.
 
-## Unreleased — `fix/audit-remediation`
+## Unreleased
+
+### Docs
+- README: removed the "live database predates the migration baseline" limitation. The live database was baselined and migrated on 2026-10-29 (`prisma migrate status` up to date, `migrate diff --exit-code` 0); the baseline procedure is kept as the documented path for any database created with `prisma db push`.
+
+## 2026-10-29 — PR #15 (`fix/audit-remediation`)
 
 Follow-up to the 2026-10-29 cross-repository review (QuickCart + EcommerceCloud).
 

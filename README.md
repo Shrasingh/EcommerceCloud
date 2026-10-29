@@ -185,7 +185,13 @@ The seed needs an owner: sign in once, copy your user id from Clerk → Users, t
 The schema lives in `prisma/schema.prisma`. `prisma/migrations/0_init` is a baseline generated from that schema.
 
 - **New database:** `npx prisma migrate deploy`.
-- **Existing database created with `prisma db push`** (the live demo database): first confirm there is no drift (`npx prisma migrate diff --from-url "$DIRECT_URL" --to-schema-datamodel prisma/schema.prisma --exit-code` must exit 0), then mark the baseline as applied once, without running it: `npx prisma migrate resolve --applied 0_init`. Do **not** run `migrate deploy` on it first; that would try to recreate existing tables and record a failed migration.
+- **Existing database created with `prisma db push`** (how the live demo database was originally created; it was baselined and migrated this way on 2026-10-29): its tables match `0_init` but Prisma does not know that, so `npx prisma migrate status` lists every migration as pending, including `0_init`. Do **not** run `migrate deploy` first; it would try to recreate the existing tables and record a failed migration. Instead:
+  1. `npx prisma migrate diff --from-url "$DIRECT_URL" --to-schema-datamodel prisma/schema.prisma --script` — the printed SQL must contain only the statements of the migrations *after* `0_init` (new columns on `Order`/`OrderItem`, the `PaymentException` and `RateLimit` tables). Anything else is real drift; stop and resolve it by hand.
+  2. `npx prisma migrate resolve --applied 0_init` — marks the baseline as applied without running it (one time only).
+  3. `npm run db:migrate:deploy` — applies the remaining migrations.
+  4. `npx prisma migrate status` must report "Database schema is up to date", and the `migrate diff` command above with `--exit-code` instead of `--script` must exit 0.
+
+  Until steps 2–3 have been run, every page or route that reads the newer columns and tables fails at request time with Prisma error `P2022`/`P2021` (a 500): the store overview, the orders page, checkout (creating the order) and the webhook. Signed-out pages and the public catalog API keep working, so a green build does not prove the database is ready.
 - **Price-snapshot migration** (`20261024120000_order_price_snapshot`): additive only (two nullable columns, a nullable unique column, two CHECK constraints), so existing rows stay valid with NULL prices. After the baseline step above, apply it with `npm run db:migrate:deploy`. Deploy order: migration first, then the code that writes the new columns.
 - **Payment-exception migration** (`20261026120000_payment_exception`): additive only — creates the `PaymentException` table (webhook mismatch log) and its indexes; no existing table or row is touched. Apply with `npm run db:migrate:deploy`.
 - **Rate-limit migration** (`20261029120000_rate_limit`): additive only — creates the `RateLimit` table used by the checkout limiter. Deploy order: migration first, then the code; until the table exists the limiter logs `[CHECKOUT_RATE_LIMIT]` and lets requests through (fail-open), so a code-first deploy degrades to "no limit" rather than to a broken checkout.
@@ -270,7 +276,6 @@ This is a solo portfolio project, so it uses a single long-lived branch and shor
 - **Image uploads are unsigned** (a public, unsigned Cloudinary preset). The widget limits sources, formats and size client-side, but only the preset's own settings in Cloudinary (folder, formats, max bytes) are enforced server-side; signed uploads (a server endpoint using `CLOUDINARY_API_SECRET`) would be the hardening step. Stored image URLs are already restricted to approved hosts.
 - **List endpoints aren't paginated.** Fine for hundreds of products per store; pagination is needed beyond that. The dashboard loads every paid order to compute revenue; a SQL aggregate would scale better.
 - **Single currency (USD)** and prices stored without tax or shipping.
-- **The live database predates the migration baseline.** It still needs a one-time `prisma migrate resolve --applied 0_init`.
 - **Clerk runs in development mode** on `vercel.app` domains (production keys require a custom domain).
 - **No admin UI for `PaymentException`.** Unresolved records are reviewed with the SQL query in [Operations: payment exceptions](#operations-payment-exceptions).
 
