@@ -21,6 +21,11 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@prisma/*"
         update-types: ["version-update:semver-major"]
+      # Tailwind CSS 4 moves the PostCSS plugin to @tailwindcss/postcss, replaces
+      # the `@tailwind` directives and changes the config format, so 3 -> 4 is a
+      # manual migration (Dependabot PR #6 fails typecheck).
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

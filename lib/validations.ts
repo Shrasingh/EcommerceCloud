@@ -68,24 +68,54 @@ export const colorSchema = z.object({
     .regex(HEX_COLOR, "Value must be a hex color code, e.g. #ff0000"),
 });
 
-export const productSchema = z.object({
-  name: requiredString("Name"),
-  price: z.coerce
-    .number<number>({ error: "Price is required" })
-    .positive("Price must be greater than 0")
-    .max(1_000_000, "Price is too large"),
-  categoryId: id("Category id"),
-  sizeId: id("Size id"),
-  colorId: id("Color id"),
-  images: z
-    .array(z.object({ url: imageUrl }), {
-      error: "Images are required",
-    })
-    .min(1, "Images are required")
-    .max(10, "At most 10 images are allowed"),
-  isFeatured: z.boolean().optional().default(false),
-  isArchived: z.boolean().optional().default(false),
-});
+// Optional text: an empty or blank string means "not set" and is stored as NULL.
+const optionalText = (label: string, max: number) =>
+  z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    z.string().trim().max(max, `${label} must be at most ${max} characters`).nullable().optional()
+  );
+
+// Optional price: "", null and undefined all mean "not set".
+const optionalPriceField = z.preprocess(
+  (v) => (v === "" || v === null ? null : v),
+  z.coerce
+    .number<number>({ error: "Original price must be a number" })
+    .positive("Original price must be greater than 0")
+    .max(1_000_000, "Original price is too large")
+    .nullable()
+    .optional()
+);
+
+export const productSchema = z
+  .object({
+    name: requiredString("Name"),
+    price: z.coerce
+      .number<number>({ error: "Price is required" })
+      .positive("Price must be greater than 0")
+      .max(1_000_000, "Price is too large"),
+    categoryId: id("Category id"),
+    sizeId: id("Size id"),
+    colorId: id("Color id"),
+    images: z
+      .array(z.object({ url: imageUrl }), {
+        error: "Images are required",
+      })
+      .min(1, "Images are required")
+      .max(10, "At most 10 images are allowed"),
+    isFeatured: z.boolean().optional().default(false),
+    isArchived: z.boolean().optional().default(false),
+    // Storefront-facing details. All optional so existing API clients that
+    // omit them keep working; omitted fields are left unchanged on PATCH.
+    description: optionalText("Description", 5000),
+    brand: optionalText("Brand", 100),
+    /** "Was" price shown struck through next to `price`; must exceed it. */
+    originalPrice: optionalPriceField,
+    isInStock: z.boolean().optional(),
+  })
+  .refine((p) => p.originalPrice === null || p.originalPrice === undefined || p.originalPrice > p.price, {
+    message: "Original price must be greater than the price",
+    path: ["originalPrice"],
+  });
 
 export const checkoutSchema = z.object({
   productIds: z

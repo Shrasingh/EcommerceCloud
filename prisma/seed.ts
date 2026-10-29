@@ -409,12 +409,22 @@ async function main() {
   console.log("Seeding QuickCart Demo Store...\n");
 
   if (OWNER_ID === "seed-demo-user") {
-    console.log(
-      "NOTE: SEED_STORE_OWNER_ID is not set — the store will be owned by the\n" +
-        '      placeholder id "seed-demo-user". To manage this store in the admin\n' +
-        "      dashboard, set SEED_STORE_OWNER_ID to your Clerk user id and re-run:\n" +
-        "        SEED_STORE_OWNER_ID=user_xxx npx prisma db seed\n"
-    );
+    // A store owned by a placeholder id can never be managed from the
+    // dashboard, yet its catalog and checkout API would be live. Refuse
+    // unless the operator explicitly asks for that.
+    if (process.env.SEED_ALLOW_PLACEHOLDER_OWNER !== "1") {
+      console.error(
+        "SEED ABORTED — nothing was deleted.\n" +
+          "SEED_STORE_OWNER_ID is not set, so the seeded store would belong to the\n" +
+          'placeholder id "seed-demo-user" and no dashboard user could manage it.\n' +
+          "Set SEED_STORE_OWNER_ID to your Clerk user id (Clerk dashboard > Users):\n" +
+          "  SEED_STORE_OWNER_ID=user_xxx npm run seed\n" +
+          "or, for a throwaway demo database only, SEED_ALLOW_PLACEHOLDER_OWNER=1.\n"
+      );
+      process.exitCode = 1;
+      return;
+    }
+    console.log('NOTE: seeding with the placeholder owner "seed-demo-user" (SEED_ALLOW_PLACEHOLDER_OWNER=1).\n');
   } else {
     console.log(`Using store owner id: ${OWNER_ID}\n`);
   }

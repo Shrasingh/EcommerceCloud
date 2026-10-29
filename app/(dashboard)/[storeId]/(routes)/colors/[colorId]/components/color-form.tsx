@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { Color } from "@prisma/client";
 import { useForm } from "react-hook-form";
-import { Settings } from "lucide-react";
 import Heading from "@/components/ui/heading";
 import { Button } from "@/components/ui/button";
 import { Trash } from "lucide-react"; // an icon component that visually represents a trash can, typically used to indicate deletion functionality in a user interface.
@@ -26,7 +25,6 @@ import { Input } from "@/components/ui/input";
 import { useRouter } from "next/navigation";
 import { AlertModal } from "@/components/modals/alert-modal";
 
-import { useOrigin } from "@/hooks/use-origin";
 import { HEX_COLOR } from "@/lib/validations";
 const formSchema = z.object({
   name: z.string().min(1),
@@ -45,8 +43,8 @@ export const ColorForm: React.FC<ColorFormProps> = ({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const title = initialData ? "Edit Color" : "Create Color";
-  const description = initialData ? "Edit Color" : "Add a new  color";
-  const toastMessage = initialData ? "Color updated" : " color created";
+  const description = initialData ? "Edit Color" : "Add a new color";
+  const toastMessage = initialData ? "Color updated" : "Color created";
   const action = initialData ? "Save changes " : "Create ";
   const form = useForm<ColorFormValues>({
     resolver: zodResolver(formSchema),
@@ -78,7 +76,7 @@ export const ColorForm: React.FC<ColorFormProps> = ({
       setLoading(true);
       await axios.delete(`/api/${params.storeId}/colors/${params.colorId}`);
       router.refresh();
-      router.push("/");
+      router.push(`/${params.storeId}/colors`);
       toast.success("Color deleted.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Could not delete. Please try again."));
@@ -92,7 +90,7 @@ export const ColorForm: React.FC<ColorFormProps> = ({
       <AlertModal
         isOpen={open}
         onClose={() => setOpen(false)}
-        onConfirm={() => {}}
+        onConfirm={ondelete}
         loading={loading}
       />
       <div className=" flex items-center justify-between">

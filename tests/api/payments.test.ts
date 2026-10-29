@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
-import { prismaMock, resetPrismaMock, transactionMock } from "../helpers/prisma-mock";
+import { prismaMock, queryRawMock, resetPrismaMock, transactionMock } from "../helpers/prisma-mock";
+import { CHECKOUT_RATE_LIMIT } from "@/lib/rate-limit";
 import { ctx, jsonRequest } from "../helpers/http";
 
 const stripeMock = vi.hoisted(() => ({
@@ -29,10 +30,40 @@ beforeEach(() => {
 });
 
 describe("POST /api/[storeId]/checkout", () => {
-  it("returns 400 (with CORS headers) for an empty cart", async () => {
-    const res = await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: [] }), ctx({ storeId: "s1" }));
+  it("returns 400 (with CORS headers for the storefront origin) for an empty cart", async () => {
+    const res = await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: [] }, { Origin: "https://store.example" }),
+      ctx({ storeId: "s1" })
+    );
     expect(res.status).toBe(400);
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://store.example");
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("sets a short session expiry (Unix seconds) to shrink the double-sell window", async () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: "p1", name: "Lamp", price: decimal(5) }]);
+    prismaMock.order.create.mockResolvedValue({ id: "o1" });
+    stripeMock.checkout.sessions.create.mockResolvedValue({ id: "cs_1", url: "https://checkout.stripe.com/x" });
+
+    const before = Math.floor(Date.now() / 1000);
+    await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    const after = Math.floor(Date.now() / 1000);
+    const { expires_at } = stripeMock.checkout.sessions.create.mock.calls[0][0];
+
+    expect(Number.isInteger(expires_at)).toBe(true);
+    // Lifetime as seen from this process: 60 minutes, give or take the test's own run time.
+    expect(expires_at - before).toBeGreaterThanOrEqual(checkout.SESSION_EXPIRY_SECONDS);
+    expect(expires_at - after).toBeLessThanOrEqual(checkout.SESSION_EXPIRY_SECONDS);
+    expect(expires_at - before).toBeLessThan(checkout.SESSION_EXPIRY_SECONDS + 60);
+  });
+
+  it("keeps a safety margin over Stripe's 30-minute minimum for clock skew and latency", () => {
+    expect(checkout.STRIPE_MIN_SESSION_LIFETIME_SECONDS).toBe(30 * 60);
+    expect(checkout.SESSION_EXPIRY_MARGIN_SECONDS).toBeGreaterThanOrEqual(60);
+    expect(checkout.SESSION_EXPIRY_SECONDS).toBe(60 * 60);
+    expect(checkout.SESSION_EXPIRY_SECONDS - checkout.STRIPE_MIN_SESSION_LIFETIME_SECONDS).toBe(checkout.SESSION_EXPIRY_MARGIN_SECONDS);
+    // Still well inside Stripe's 24-hour maximum.
+    expect(checkout.SESSION_EXPIRY_SECONDS).toBeLessThan(24 * 60 * 60);
   });
 
   it("only considers this store's unarchived, in-stock products", async () => {
@@ -182,7 +213,7 @@ describe("POST /api/[storeId]/checkout", () => {
     const body = await res.text();
     expect(body).toBe("Checkout is temporarily unavailable due to a server configuration error.");
     expect(body).not.toContain("secret");
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
     expect(prismaMock.product.findMany).not.toHaveBeenCalled();
     expect(prismaMock.order.create).not.toHaveBeenCalled();
     expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
@@ -216,6 +247,124 @@ describe("POST /api/[storeId]/checkout", () => {
     expect(transactionMock).toHaveBeenCalledTimes(1);
     expect(prismaMock.orderItem.deleteMany).toHaveBeenCalledWith({ where: { orderId: "o1" } });
     expect(prismaMock.order.delete).toHaveBeenCalledWith({ where: { id: "o1" } });
+  });
+});
+
+describe("POST /api/[storeId]/checkout: storefront origin isolation", () => {
+  const available = () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: "p1", name: "Lamp", price: decimal(5) }]);
+    prismaMock.order.create.mockResolvedValue({ id: "o1" });
+    stripeMock.checkout.sessions.create.mockResolvedValue({ id: "cs_1", url: "https://checkout.stripe.com/x" });
+  };
+
+  it("refuses a browser origin that is not on the allow list before touching the database", async () => {
+    available();
+    const res = await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://quick-cart-git-feature-x.vercel.app" }),
+      ctx({ storeId: "s1" })
+    );
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe("This storefront is not allowed to start a checkout.");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(prismaMock.product.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.order.create).not.toHaveBeenCalled();
+    expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("never redirects a Preview origin to production: an allow-listed origin gets its own success/cancel URLs", async () => {
+    process.env.ALLOWED_STOREFRONT_ORIGINS = "https://quick-cart-staging.vercel.app";
+    available();
+    try {
+      const res = await checkout.POST(
+        jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://quick-cart-staging.vercel.app" }),
+        ctx({ storeId: "s1" })
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://quick-cart-staging.vercel.app");
+      const session = stripeMock.checkout.sessions.create.mock.calls[0][0];
+      expect(session.success_url).toBe("https://quick-cart-staging.vercel.app/order-success?orderId=o1");
+      expect(session.cancel_url).toBe("https://quick-cart-staging.vercel.app/cart?canceled=1");
+    } finally {
+      delete process.env.ALLOWED_STOREFRONT_ORIGINS;
+    }
+  });
+
+  it("uses FRONTEND_STORE_URL for the production storefront's own origin and for non-browser callers", async () => {
+    available();
+    await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://store.example" }),
+      ctx({ storeId: "s1" })
+    );
+    expect(stripeMock.checkout.sessions.create.mock.calls[0][0].success_url).toBe("https://store.example/order-success?orderId=o1");
+
+    stripeMock.checkout.sessions.create.mockClear();
+    available();
+    await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    expect(stripeMock.checkout.sessions.create.mock.calls[0][0].success_url).toBe("https://store.example/order-success?orderId=o1");
+  });
+
+  it("answers the CORS preflight only for allow-listed origins", async () => {
+    const allowed = await checkout.OPTIONS(
+      new Request("http://localhost/api/s1/checkout", { method: "OPTIONS", headers: { Origin: "https://store.example" } })
+    );
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("https://store.example");
+    expect(allowed.headers.get("Access-Control-Allow-Methods")).toContain("POST");
+
+    const refused = await checkout.OPTIONS(
+      new Request("http://localhost/api/s1/checkout", { method: "OPTIONS", headers: { Origin: "https://evil.example" } })
+    );
+    expect(refused.status).toBe(204);
+    expect(refused.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
+
+describe("POST /api/[storeId]/checkout: rate limiting", () => {
+  const withProduct = () => {
+    prismaMock.product.findMany.mockResolvedValue([{ id: "p1", name: "Lamp", price: decimal(5) }]);
+    prismaMock.order.create.mockResolvedValue({ id: "o1" });
+    stripeMock.checkout.sessions.create.mockResolvedValue({ id: "cs_1", url: "https://checkout.stripe.com/x" });
+  };
+
+  it("keys the shared counter by store and client address", async () => {
+    withProduct();
+    await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { "x-forwarded-for": "203.0.113.9, 10.0.0.1" }),
+      ctx({ storeId: "s1" })
+    );
+    const [, ...values] = queryRawMock.mock.calls[0];
+    expect(values).toContain("checkout:s1:203.0.113.9");
+  });
+
+  it("returns 429 with Retry-After and creates nothing once the limit is exceeded", async () => {
+    withProduct();
+    queryRawMock.mockResolvedValue([{ count: CHECKOUT_RATE_LIMIT.limit + 1 }]);
+    const res = await checkout.POST(
+      jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }, { Origin: "https://store.example" }),
+      ctx({ storeId: "s1" })
+    );
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://store.example");
+    expect(await res.text()).toMatch(/Too many checkout attempts/);
+    expect(prismaMock.product.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.order.create).not.toHaveBeenCalled();
+    expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("allows exactly the limit-th request", async () => {
+    withProduct();
+    queryRawMock.mockResolvedValue([{ count: CHECKOUT_RATE_LIMIT.limit }]);
+    const res = await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    expect(res.status).toBe(200);
+  });
+
+  it("fails open (and logs) when the counter store is unavailable", async () => {
+    withProduct();
+    queryRawMock.mockRejectedValue(new Error("connection reset"));
+    const res = await checkout.POST(jsonRequest("/api/s1/checkout", "POST", { productIds: ["p1"] }), ctx({ storeId: "s1" }));
+    expect(res.status).toBe(200);
+    expect(console.error).toHaveBeenCalledWith("[CHECKOUT_RATE_LIMIT]", expect.any(Error));
   });
 });
 
@@ -269,6 +418,7 @@ function fakeDatabase({ legacy = false, sessionId = "cs_1" }: FakeOptions = {}) 
       ["p1", { id: "p1", isArchived: false }],
       ["p2", { id: "p2", isArchived: false }],
     ]),
+    paymentExceptions: [] as { orderId: string; sessionId: string; reason: string; eventId: string }[],
   };
   const tx = {
     order: {
@@ -295,7 +445,8 @@ function fakeDatabase({ legacy = false, sessionId = "cs_1" }: FakeOptions = {}) 
         let count = 0;
         for (const id of where.id.in) {
           const p = db.products.get(id);
-          if (p) {
+          // Like SQL: a filter key that is absent matches any value.
+          if (p && (where.isArchived === undefined || p.isArchived === where.isArchived)) {
             Object.assign(p, data);
             count++;
           }
@@ -303,8 +454,40 @@ function fakeDatabase({ legacy = false, sessionId = "cs_1" }: FakeOptions = {}) 
         return { count };
       }),
     },
+    paymentException: {
+      // Inside the transaction the webhook uses the transaction client, so
+      // the record is governed by the same commit/rollback as the transition.
+      // Tests can still make the write fail through prismaMock.paymentException.create.
+      create: vi.fn(async (args: any) => {
+        const result = await prismaMock.paymentException.create(args);
+        if (db.paymentExceptions.some((e) => e.eventId === args.data.eventId)) {
+          throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed on eventId", {
+            code: "P2002",
+            clientVersion: "test",
+          });
+        }
+        db.paymentExceptions.push({ ...args.data });
+        return result ?? { id: `pe_${db.paymentExceptions.length}` };
+      }),
+    },
   };
-  transactionMock.mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
+  // Postgres semantics: every write inside the callback is discarded if it throws.
+  const snapshot = () => ({
+    orders: new Map([...db.orders].map(([k, v]) => [k, { ...v }])),
+    products: new Map([...db.products].map(([k, v]) => [k, { ...v }])),
+    paymentExceptions: db.paymentExceptions.map((e) => ({ ...e })),
+  });
+  transactionMock.mockImplementation(async (fn: (t: typeof tx) => unknown) => {
+    const before = snapshot();
+    try {
+      return await fn(tx);
+    } catch (error) {
+      db.orders = before.orders;
+      db.products = before.products;
+      db.paymentExceptions = before.paymentExceptions;
+      throw error;
+    }
+  });
   return { db, tx };
 }
 
@@ -555,5 +738,85 @@ describe("POST /api/webhook: durable mismatch recording", () => {
     const res = await deliver("checkout.session.completed", { ...paidSession, amount_subtotal: 1 });
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe("POST /api/webhook: oversell (nothing is reserved at checkout)", () => {
+  it("flags a paid order whose item was already sold to an earlier order, instead of fulfilling it silently", async () => {
+    const { db, tx } = fakeDatabase();
+    // Another shopper's payment for p1 arrived first while this session was still open.
+    db.products.get("p1")!.isArchived = true;
+    prismaMock.paymentException.create.mockResolvedValue({ id: "pe1" });
+
+    const res = await deliver("checkout.session.completed", paidSession);
+
+    expect(res.status).toBe(200);
+    // The money was taken, so the order is paid and the still-available item is archived...
+    expect(db.orders.get("o1")!.isPaid).toBe(true);
+    expect(db.products.get("p2")!.isArchived).toBe(true);
+    // ...and the shortfall is recorded durably for a refund, inside the same transaction.
+    expect(tx.paymentException.create).toHaveBeenCalledTimes(1);
+    expect(db.paymentExceptions).toHaveLength(1);
+    expect(db.paymentExceptions[0]).toMatchObject({
+      orderId: "o1",
+      sessionId: "cs_1",
+      reason: expect.stringMatching(/oversold: 1 of 2/),
+      eventId: expect.any(String),
+    });
+    // Only ids/reason are stored, never customer PII.
+    expect(Object.keys(db.paymentExceptions[0]).sort()).toEqual(["eventId", "orderId", "reason", "sessionId"]);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("STRIPE_WEBHOOK_OVERSOLD"));
+  });
+
+  it("does not record an exception when every item was still available", async () => {
+    const { db, tx } = fakeDatabase();
+    await deliver("checkout.session.completed", paidSession);
+    expect(tx.paymentException.create).not.toHaveBeenCalled();
+    expect(db.paymentExceptions).toEqual([]);
+  });
+
+  it("rolls back the paid transition and the archive when the oversell record cannot be written, and returns 500", async () => {
+    const { db } = fakeDatabase();
+    db.products.get("p1")!.isArchived = true;
+    prismaMock.paymentException.create.mockRejectedValue(new Error("db down"));
+
+    const res = await deliver("checkout.session.completed", paidSession);
+
+    expect(res.status).toBe(500); // Stripe will retry
+    // Nothing from the failed attempt is left behind: the order is still
+    // unpaid and p2 is still on sale, exactly as before the delivery.
+    expect(db.orders.get("o1")).toMatchObject({ isPaid: false, address: "", phone: "" });
+    expect(db.products.get("p2")!.isArchived).toBe(false);
+    expect(db.paymentExceptions).toEqual([]);
+  });
+
+  it("a retry after a failed record write fulfils once and records the oversell once; a further duplicate changes nothing", async () => {
+    const { db, tx } = fakeDatabase();
+    db.products.get("p1")!.isArchived = true;
+    // First delivery: the exception insert fails -> whole transaction rolled back.
+    prismaMock.paymentException.create.mockRejectedValueOnce(new Error("connection reset"));
+    prismaMock.paymentException.create.mockResolvedValue({ id: "pe1" });
+    stripeMock.webhooks.constructEvent.mockReturnValue(stripeEvent("checkout.session.completed", paidSession));
+
+    const first = await webhook.POST(webhookRequest());
+    expect(first.status).toBe(500);
+    expect(db.orders.get("o1")!.isPaid).toBe(false);
+    expect(db.paymentExceptions).toEqual([]);
+
+    // Stripe redelivers the same event (same id): the transition and the record commit together.
+    const retry = await webhook.POST(webhookRequest());
+    expect(retry.status).toBe(200);
+    expect(db.orders.get("o1")!.isPaid).toBe(true);
+    expect(db.products.get("p2")!.isArchived).toBe(true);
+    expect(db.paymentExceptions).toHaveLength(1);
+
+    // A third delivery of the same event is a no-op: no second transition, no second record.
+    const duplicate = await webhook.POST(webhookRequest());
+    expect(duplicate.status).toBe(200);
+    expect(tx.order.updateMany).toHaveBeenCalledTimes(2); // first (rolled back) + retry; duplicate stops at isPaid
+    expect(tx.product.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.paymentException.create).toHaveBeenCalledTimes(2); // failed attempt + the committed one
+    expect(db.paymentExceptions).toHaveLength(1);
+    expect(db.orders.get("o1")!.isPaid).toBe(true);
   });
 });

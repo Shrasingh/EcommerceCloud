@@ -13,12 +13,19 @@ function model(name: string): ModelMock {
 }
 
 export const transactionMock = vi.fn();
+/** `$queryRaw` (used by the rate limiter). Reset to "first request in the window" before each test. */
+export const queryRawMock = vi.fn();
 
-export const prismaMock = new Proxy({} as Record<string, ModelMock> & { $transaction: Mock }, {
-  get: (_target, key: string) => (key === "$transaction" ? transactionMock : model(key)),
-});
+const clientMethods: Record<string, Mock> = { $transaction: transactionMock, $queryRaw: queryRawMock };
+
+export const prismaMock = new Proxy(
+  {} as Record<string, ModelMock> & { $transaction: Mock; $queryRaw: Mock },
+  { get: (_target, key: string) => clientMethods[key] ?? model(key) }
+);
 
 export function resetPrismaMock() {
   for (const m of Object.values(models)) for (const fn of Object.values(m)) fn.mockReset();
   transactionMock.mockReset();
+  queryRawMock.mockReset();
+  queryRawMock.mockResolvedValue([{ count: 1 }]);
 }
