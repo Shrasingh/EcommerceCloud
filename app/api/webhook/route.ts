@@ -9,10 +9,34 @@ import { classifyCheckoutEvent } from "@/lib/stripe-events";
 import { verifySessionForOrder } from "@/lib/order-payment";
 
 type FulfilmentOutcome =
-  | { status: "fulfilled"; legacy: boolean }
+  | {
+      status: "fulfilled";
+      legacy: boolean;
+      /** Items that were already archived (sold to an earlier order) when this payment arrived. */
+      oversold: number;
+      itemCount: number;
+    }
   | { status: "already_paid" }
   | { status: "order_missing" }
   | { status: "rejected"; reason: string };
+
+/**
+ * Writes a PaymentException for manual review. A redelivery of the same event
+ * hits the unique eventId and is a no-op; any other write failure propagates
+ * so the caller returns 500 and Stripe retries (the record is never lost).
+ * Only ids/amounts/reasons are stored, no PII.
+ */
+async function recordPaymentException(orderId: string, sessionId: string, reason: string, eventId: string) {
+  try {
+    await prismadb.paymentException.create({ data: { orderId, sessionId, reason, eventId } });
+  } catch (recordError) {
+    if (recordError instanceof Prisma.PrismaClientKnownRequestError && recordError.code === "P2002") {
+      console.warn(`[STRIPE_WEBHOOK] exception already recorded for event ${eventId}`);
+      return;
+    }
+    throw recordError;
+  }
+}
 
 export async function POST(req: Request) {
   const body = await req.text();
@@ -79,11 +103,36 @@ export async function POST(req: Request) {
       });
       if (transition.count === 0) return { status: "already_paid" };
 
-      await tx.product.updateMany({
-        where: { id: { in: order.orderItems.map((item) => item.productId) } },
+      // Archive the sold items. Each product is a single unit: one that is
+      // already archived was sold to an earlier order while this session was
+      // open (nothing is reserved at checkout), so this payment is an
+      // oversell. Only still-available items are archived here; the shortfall
+      // is reported for a refund instead of being silently fulfilled.
+      const productIds = order.orderItems.map((item) => item.productId);
+      const archived = await tx.product.updateMany({
+        where: { id: { in: productIds }, isArchived: false },
         data: { isArchived: true },
       });
-      return { status: "fulfilled", legacy: check.legacy };
+      const oversold = productIds.length - archived.count;
+
+      // The reconciliation record is written in the same transaction as the
+      // paid transition, so either both commit or neither does. If it were
+      // written afterwards and failed, Stripe's retry would find the order
+      // already paid, acknowledge, and the oversell would never be recorded.
+      // The unique eventId cannot collide here: only the delivery that wins
+      // the transition reaches this line, and a redelivery returns
+      // "already_paid" above.
+      if (oversold > 0) {
+        await tx.paymentException.create({
+          data: {
+            orderId,
+            sessionId: session.id,
+            reason: `oversold: ${oversold} of ${productIds.length} item(s) were already sold to an earlier order; refund required`,
+            eventId: event.id,
+          },
+        });
+      }
+      return { status: "fulfilled", legacy: check.legacy, oversold, itemCount: productIds.length };
     });
 
     if (outcome.status === "order_missing") {
@@ -91,27 +140,21 @@ export async function POST(req: Request) {
       console.warn(`[STRIPE_WEBHOOK] paid session for unknown order ${orderId}`);
     } else if (outcome.status === "rejected") {
       // Payment was taken but doesn't match the order. Record it durably for
-      // manual review before acknowledging. A redelivery of the same event
-      // hits the unique eventId and is a no-op; any other write failure throws
-      // to the outer catch and returns 500 so Stripe retries (we don't lose
-      // the mismatch). Only ids/amounts/currency are stored — no PII.
-      try {
-        await prismadb.paymentException.create({
-          data: { orderId, sessionId: session.id, reason: outcome.reason, eventId: event.id },
-        });
-      } catch (recordError) {
-        if (
-          recordError instanceof Prisma.PrismaClientKnownRequestError &&
-          recordError.code === "P2002"
-        ) {
-          console.warn(`[STRIPE_WEBHOOK] mismatch already recorded for event ${event.id}`);
-        } else {
-          throw recordError;
-        }
-      }
+      // manual review before acknowledging.
+      await recordPaymentException(orderId, session.id, outcome.reason, event.id);
       console.error(`[STRIPE_WEBHOOK_REJECTED] order ${orderId}, session ${session.id}: ${outcome.reason}`);
-    } else if (outcome.status === "fulfilled" && outcome.legacy) {
-      console.warn(`[STRIPE_WEBHOOK] fulfilled legacy order ${orderId} without recorded prices`);
+    } else if (outcome.status === "fulfilled") {
+      if (outcome.oversold > 0) {
+        // The customer paid for an item that had already been sold. The order
+        // is marked paid (the money was taken) and the PaymentException
+        // flagging it for a refund was committed with the transition above.
+        console.error(
+          `[STRIPE_WEBHOOK_OVERSOLD] order ${orderId}, session ${session.id}: ${outcome.oversold} of ${outcome.itemCount} item(s) already sold; refund required`
+        );
+      }
+      if (outcome.legacy) {
+        console.warn(`[STRIPE_WEBHOOK] fulfilled legacy order ${orderId} without recorded prices`);
+      }
     }
   } catch (error) {
     // A 500 makes Stripe retry delivery later.

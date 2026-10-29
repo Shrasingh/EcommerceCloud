@@ -418,6 +418,7 @@ function fakeDatabase({ legacy = false, sessionId = "cs_1" }: FakeOptions = {}) 
       ["p1", { id: "p1", isArchived: false }],
       ["p2", { id: "p2", isArchived: false }],
     ]),
+    paymentExceptions: [] as { orderId: string; sessionId: string; reason: string; eventId: string }[],
   };
   const tx = {
     order: {
@@ -444,7 +445,8 @@ function fakeDatabase({ legacy = false, sessionId = "cs_1" }: FakeOptions = {}) 
         let count = 0;
         for (const id of where.id.in) {
           const p = db.products.get(id);
-          if (p) {
+          // Like SQL: a filter key that is absent matches any value.
+          if (p && (where.isArchived === undefined || p.isArchived === where.isArchived)) {
             Object.assign(p, data);
             count++;
           }
@@ -452,8 +454,40 @@ function fakeDatabase({ legacy = false, sessionId = "cs_1" }: FakeOptions = {}) 
         return { count };
       }),
     },
+    paymentException: {
+      // Inside the transaction the webhook uses the transaction client, so
+      // the record is governed by the same commit/rollback as the transition.
+      // Tests can still make the write fail through prismaMock.paymentException.create.
+      create: vi.fn(async (args: any) => {
+        const result = await prismaMock.paymentException.create(args);
+        if (db.paymentExceptions.some((e) => e.eventId === args.data.eventId)) {
+          throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed on eventId", {
+            code: "P2002",
+            clientVersion: "test",
+          });
+        }
+        db.paymentExceptions.push({ ...args.data });
+        return result ?? { id: `pe_${db.paymentExceptions.length}` };
+      }),
+    },
   };
-  transactionMock.mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
+  // Postgres semantics: every write inside the callback is discarded if it throws.
+  const snapshot = () => ({
+    orders: new Map([...db.orders].map(([k, v]) => [k, { ...v }])),
+    products: new Map([...db.products].map(([k, v]) => [k, { ...v }])),
+    paymentExceptions: db.paymentExceptions.map((e) => ({ ...e })),
+  });
+  transactionMock.mockImplementation(async (fn: (t: typeof tx) => unknown) => {
+    const before = snapshot();
+    try {
+      return await fn(tx);
+    } catch (error) {
+      db.orders = before.orders;
+      db.products = before.products;
+      db.paymentExceptions = before.paymentExceptions;
+      throw error;
+    }
+  });
   return { db, tx };
 }
 
@@ -704,5 +738,85 @@ describe("POST /api/webhook: durable mismatch recording", () => {
     const res = await deliver("checkout.session.completed", { ...paidSession, amount_subtotal: 1 });
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe("POST /api/webhook: oversell (nothing is reserved at checkout)", () => {
+  it("flags a paid order whose item was already sold to an earlier order, instead of fulfilling it silently", async () => {
+    const { db, tx } = fakeDatabase();
+    // Another shopper's payment for p1 arrived first while this session was still open.
+    db.products.get("p1")!.isArchived = true;
+    prismaMock.paymentException.create.mockResolvedValue({ id: "pe1" });
+
+    const res = await deliver("checkout.session.completed", paidSession);
+
+    expect(res.status).toBe(200);
+    // The money was taken, so the order is paid and the still-available item is archived...
+    expect(db.orders.get("o1")!.isPaid).toBe(true);
+    expect(db.products.get("p2")!.isArchived).toBe(true);
+    // ...and the shortfall is recorded durably for a refund, inside the same transaction.
+    expect(tx.paymentException.create).toHaveBeenCalledTimes(1);
+    expect(db.paymentExceptions).toHaveLength(1);
+    expect(db.paymentExceptions[0]).toMatchObject({
+      orderId: "o1",
+      sessionId: "cs_1",
+      reason: expect.stringMatching(/oversold: 1 of 2/),
+      eventId: expect.any(String),
+    });
+    // Only ids/reason are stored, never customer PII.
+    expect(Object.keys(db.paymentExceptions[0]).sort()).toEqual(["eventId", "orderId", "reason", "sessionId"]);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("STRIPE_WEBHOOK_OVERSOLD"));
+  });
+
+  it("does not record an exception when every item was still available", async () => {
+    const { db, tx } = fakeDatabase();
+    await deliver("checkout.session.completed", paidSession);
+    expect(tx.paymentException.create).not.toHaveBeenCalled();
+    expect(db.paymentExceptions).toEqual([]);
+  });
+
+  it("rolls back the paid transition and the archive when the oversell record cannot be written, and returns 500", async () => {
+    const { db } = fakeDatabase();
+    db.products.get("p1")!.isArchived = true;
+    prismaMock.paymentException.create.mockRejectedValue(new Error("db down"));
+
+    const res = await deliver("checkout.session.completed", paidSession);
+
+    expect(res.status).toBe(500); // Stripe will retry
+    // Nothing from the failed attempt is left behind: the order is still
+    // unpaid and p2 is still on sale, exactly as before the delivery.
+    expect(db.orders.get("o1")).toMatchObject({ isPaid: false, address: "", phone: "" });
+    expect(db.products.get("p2")!.isArchived).toBe(false);
+    expect(db.paymentExceptions).toEqual([]);
+  });
+
+  it("a retry after a failed record write fulfils once and records the oversell once; a further duplicate changes nothing", async () => {
+    const { db, tx } = fakeDatabase();
+    db.products.get("p1")!.isArchived = true;
+    // First delivery: the exception insert fails -> whole transaction rolled back.
+    prismaMock.paymentException.create.mockRejectedValueOnce(new Error("connection reset"));
+    prismaMock.paymentException.create.mockResolvedValue({ id: "pe1" });
+    stripeMock.webhooks.constructEvent.mockReturnValue(stripeEvent("checkout.session.completed", paidSession));
+
+    const first = await webhook.POST(webhookRequest());
+    expect(first.status).toBe(500);
+    expect(db.orders.get("o1")!.isPaid).toBe(false);
+    expect(db.paymentExceptions).toEqual([]);
+
+    // Stripe redelivers the same event (same id): the transition and the record commit together.
+    const retry = await webhook.POST(webhookRequest());
+    expect(retry.status).toBe(200);
+    expect(db.orders.get("o1")!.isPaid).toBe(true);
+    expect(db.products.get("p2")!.isArchived).toBe(true);
+    expect(db.paymentExceptions).toHaveLength(1);
+
+    // A third delivery of the same event is a no-op: no second transition, no second record.
+    const duplicate = await webhook.POST(webhookRequest());
+    expect(duplicate.status).toBe(200);
+    expect(tx.order.updateMany).toHaveBeenCalledTimes(2); // first (rolled back) + retry; duplicate stops at isPaid
+    expect(tx.product.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.paymentException.create).toHaveBeenCalledTimes(2); // failed attempt + the committed one
+    expect(db.paymentExceptions).toHaveLength(1);
+    expect(db.orders.get("o1")!.isPaid).toBe(true);
   });
 });
