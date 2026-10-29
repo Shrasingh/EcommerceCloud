@@ -166,3 +166,14 @@ model PaymentException {
   @@index([orderId])
   @@index([resolved])
 }
+
+/// Fixed-window rate-limit counter shared by all serverless instances (see
+/// lib/rate-limit.ts). One row per key, e.g. "checkout:<store>:<ip>". Rows are
+/// overwritten in place when a new window starts.
+model RateLimit {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+
+  @@index([windowStart])
+}

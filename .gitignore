@@ -32,6 +32,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local-only reference material (interview handbook build: PDF + vendored JS)
+/docs/interview-handbook/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

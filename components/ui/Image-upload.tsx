@@ -10,6 +10,18 @@ import { ImagePlus, Trash } from "lucide-react";
 // to someone else's preset.
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
+// Client-side limits for the unsigned widget. These complement (never
+// replace) the restrictions configured on the preset itself in Cloudinary,
+// which is the only enforcement an unsigned upload has server-side.
+const UPLOAD_OPTIONS = {
+  sources: ["local", "url", "camera"] as ("local" | "url" | "camera")[],
+  multiple: false,
+  maxFiles: 1,
+  maxFileSize: 10 * 1024 * 1024, // 10 MB
+  clientAllowedFormats: ["png", "jpg", "jpeg", "webp", "gif", "avif"],
+  resourceType: "image",
+};
+
 interface ImageUploadProps {
   disabled?: boolean;
   onChange: (value: string) => void;
@@ -68,7 +80,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
           </p>
         </div>
       ) : (
-        <CldUploadWidget onSuccess={onUpload} uploadPreset={UPLOAD_PRESET}>
+        <CldUploadWidget onSuccess={onUpload} uploadPreset={UPLOAD_PRESET} options={UPLOAD_OPTIONS}>
           {({ open }) => {
             const onClick = () => {
               open();

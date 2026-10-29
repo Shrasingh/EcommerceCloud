@@ -1,8 +1,8 @@
-import { auth } from '@clerk/nextjs/server';
-import { redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import React from 'react'
 
 import prismadb from '@/lib/prismadb';
+import { requireStoreAccess } from '@/lib/require-store';
 import { SettingsForm } from './components/settings-form';
 
 interface SettingPageprops {
@@ -13,21 +13,10 @@ interface SettingPageprops {
 
 const SettingPage: React.FC<SettingPageprops> = async (props) => {
     const params = await props.params;
-    const { userId } = await auth();
-    if (!userId) {
-        redirect('/sign-in');
-    }
-
-    const store = await prismadb.store.findFirst({
-        where: {
-            id: params.storeId,
-            userId,
-        }
-    });
-
-    if (!store) {
-        redirect('/');
-    }
+    // Same ownership guard as every other dashboard page (shared via React cache).
+    const { id } = await requireStoreAccess(params.storeId);
+    const store = await prismadb.store.findUnique({ where: { id } });
+    if (!store) notFound();
 
     return (
         <div className='flex-col'>

@@ -18,7 +18,7 @@ export async function getDashboardStats(storeId: string) {
         },
       },
     }),
-    prismadb.product.count({ where: { storeId, isArchived: false } }),
+    prismadb.product.count({ where: { storeId, isArchived: false, isInStock: true } }),
   ]);
 
   const summary = summarizeRevenue(

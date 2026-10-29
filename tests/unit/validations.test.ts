@@ -120,3 +120,44 @@ describe("productQuerySchema", () => {
     expect(result.error?.issues[0].message).toBe("minPrice cannot be greater than maxPrice");
   });
 });
+
+describe("productSchema: storefront details (description, brand, originalPrice, isInStock)", () => {
+  it("are optional, so existing API clients that omit them still validate", () => {
+    const parsed = productSchema.parse(validProduct);
+    expect(parsed.description).toBeUndefined();
+    expect(parsed.brand).toBeUndefined();
+    expect(parsed.originalPrice).toBeUndefined();
+    expect(parsed.isInStock).toBeUndefined();
+  });
+
+  it("stores blank text and empty prices as null (cleared), not as empty strings", () => {
+    const parsed = productSchema.parse({ ...validProduct, description: "   ", brand: "", originalPrice: "" });
+    expect(parsed.description).toBeNull();
+    expect(parsed.brand).toBeNull();
+    expect(parsed.originalPrice).toBeNull();
+  });
+
+  it("accepts the full set and trims text", () => {
+    const parsed = productSchema.parse({
+      ...validProduct,
+      description: "  Warm light  ",
+      brand: " Lumo ",
+      originalPrice: "59.99",
+      isInStock: false,
+    });
+    expect(parsed).toMatchObject({ description: "Warm light", brand: "Lumo", originalPrice: 59.99, isInStock: false });
+  });
+
+  it.each([
+    [{ originalPrice: 49.99 }, "Original price must be greater than the price"],
+    [{ originalPrice: 10 }, "Original price must be greater than the price"],
+    [{ originalPrice: -1 }, "Original price must be greater than 0"],
+    [{ originalPrice: "abc" }, "Original price must be a number"],
+    [{ description: "x".repeat(5001) }, "Description must be at most 5000 characters"],
+    [{ isInStock: "yes" }, undefined],
+  ])("rejects %o", (override, message) => {
+    const result = productSchema.safeParse({ ...validProduct, ...override });
+    expect(result.success).toBe(false);
+    if (message) expect(result.error?.issues[0].message).toBe(message);
+  });
+});

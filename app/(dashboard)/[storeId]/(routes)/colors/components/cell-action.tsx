@@ -30,9 +30,9 @@ export const CellAction: React.FC<CellActionProps> = ({ data }) => {
   const onDelete = async () => {
     try {
       setLoading(true);
-      await axios.delete(`/api/${params.storeId}/Colors/${data.id}`);
+      await axios.delete(`/api/${params.storeId}/colors/${data.id}`);
       router.refresh();
-      router.push(`/${params.storeId}/Colors`);
+      router.push(`/${params.storeId}/colors`);
       toast.success("Color deleted.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Could not delete. Please try again."));
