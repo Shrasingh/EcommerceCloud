@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { Size } from "@prisma/client";
 import { useForm } from "react-hook-form";
-import { Settings } from "lucide-react";
 import Heading from "@/components/ui/heading";
 import { Button } from "@/components/ui/button";
 import { Trash } from "lucide-react"; // an icon component that visually represents a trash can, typically used to indicate deletion functionality in a user interface.
@@ -26,7 +25,6 @@ import { Input } from "@/components/ui/input";
 import { useRouter } from "next/navigation";
 import { AlertModal } from "@/components/modals/alert-modal";
 
-import { useOrigin } from "@/hooks/use-origin";
 const formSchema = z.object({
   name: z.string().min(1),
   value: z.string().min(1),
@@ -44,7 +42,7 @@ export const SizeForm: React.FC<SizeFormProps> = ({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const title = initialData ? "Edit size" : "Create size";
-  const description = initialData ? "Edit size" : "Add a new  size";
+  const description = initialData ? "Edit size" : "Add a new size";
   const toastMessage = initialData ? "Size updated" : "Size created";
   const action = initialData ? "Save changes " : "Create ";
   const form = useForm<SizeFormValues>({
@@ -75,9 +73,9 @@ export const SizeForm: React.FC<SizeFormProps> = ({
   const onDelete = async () => {
     try {
       setLoading(true);
-      await axios.delete(`/api/${params.storeId}/Sizes/${params.sizeId}`);
+      await axios.delete(`/api/${params.storeId}/sizes/${params.sizeId}`);
       router.refresh();
-      router.push("/");
+      router.push(`/${params.storeId}/sizes`);
       toast.success("Size deleted.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Could not delete. Please try again."));
